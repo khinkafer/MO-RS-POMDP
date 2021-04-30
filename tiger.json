@@ -1,0 +1,23 @@
+{
+	"state_transition_prob":{
+		"right_to_left":0.2,
+		"left_to_right":0.15
+	},
+	"false_observation_prob":{
+		"false_left":0.11,
+		"false_right":0.12
+	},
+	"reward":{
+		"listen": -0.5,
+		"incorrect_open":{
+			"low_risk":-1,
+			"high_risk":-2
+		},
+		"correct_open":{
+			"low_risk":1,
+			"high_risk":2
+		}
+	},
+	"discount_factor": 0.9,
+	"initial_wealth":0
+}
