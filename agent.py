@@ -170,7 +170,10 @@ class Bauerle_Rieder_agent(object):
                 self.step_indexes.insert(0,None)
             else:
                 # any other time-step
-                self.timeStep_value_calculator(time_step)
+
+                result =  self.timeStep_value_calculator(time_step)
+                if(time_step==0):
+                    return result
                 print('------')
         return
     
@@ -454,22 +457,24 @@ class Bauerle_Rieder_agent(object):
         mus_y0=mus[:,0:int(len(mus[0])/2)]
         mus_y1=mus[:,int(len(mus[0])/2):len(mus[0])]
         mus_ys=[mus_y0,mus_y1]
-        
+
         # Marginal Mu (Mu in power of Y in the paper, or Mu(dy,R)). This variable expresses the probability of being in each state(y)
         marginal_mus_y0=mus_y0.sum(axis=1)
         marginal_mus_y1=mus_y1.sum(axis=1)
         marginal_mus_ys=[marginal_mus_y0,marginal_mus_y1]
-        
+     
         # q(x_prim, y_prim | x,y,a) while in our settign it is equal to q(x_prim,y_prim|y,a)
         # make Q-kernel, the probability of reaching each y_prim x_prim pair when the real state is y and doing action a
         q=self.make_Q_kernel(self.env.transition_matrix,self.env.observation_matrix)
-        
+        #print("q",q)        
         # q(x_prim | x,y,a) while in our settign it is equal to q(x_prim|y,a)
         # make marginal-Q-kernel, the probability of getting observation x_prim, when the real state is y and doing action a
         mq=self.make_marginal_Q_kernel(self.env.transition_matrix,self.env.observation_matrix)
-    
+        #print("mq",mq)
         # C(x,y,a) while C depends only on y
         #rewards/costs of doing action a when the real state is y 
+        #print("Q",q)
+        #print("mq",mq)
         y0=0
         y1=1
         y_prim0=0
@@ -527,7 +532,7 @@ class Bauerle_Rieder_agent(object):
         
         # sum of probabilities of next Mu-space for both conditions : p(mu|y0), p(mu|y1)
         say_nomerator=next_mus[0]+next_mus[1]
-        
+        #print("say_nomerator",say_nomerator)
         # calculate final SAY result
         # normalize the whole Mu-space dist. by dividing it by totoal probability of taking x_prim
         say_result=say_nomerator/say_denominator[:,None]   
@@ -542,6 +547,7 @@ class Bauerle_Rieder_agent(object):
         int_say_result=(say_result*self.num_of_PDF_chunks*10).astype(np.int8)
         
         #return say_result
+
         return self.nearest_grid_points(int_say_result)
 
     def last_step_RS_value(self ):
@@ -562,7 +568,7 @@ class Bauerle_Rieder_agent(object):
             utility_mapped_values=self.S
         else:
             pass
-        
+        print("Self.S",self.S)
         # duplicate utility values to cover Y-dimension of the Mu-space
         utility_mapped_values=np.tile(utility_mapped_values,2)
         
@@ -644,46 +650,49 @@ class Bauerle_Rieder_agent(object):
         next_step=time_step+1
         z=np.power(self.env.gamma,time_step)
         
-        
+        # %TODO x = 0 right, x=1 left
         # value of the next internal-state (internal-state=(X,Mu,Z) )
         # this variable is the V(x_prim,say(mu),gamma*z) part of page 6 second equation.
         next_internalState_value_each_xPrim=np.array([np.empty(len(current_possible_mu)),np.empty(len(current_possible_mu))])
         
         # probability of being in each y
+        #print("Mu at index 0 : ",current_possible_mu[:,:], "LEN MU",current_possible_mu.shape)
         y_probs=(np.sum(current_possible_mu[:,0:len(self.S)],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1)
         y_probs=np.append(y_probs,(np.sum(current_possible_mu[:,len(self.S):len(self.S)*2],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1),axis=1)
+        #print("YPROB",y_probs,"LEN",y_probs.shape)
         
         # Q(x'|x,y,a).. which based-on the experiment design is equal to Q(x'|y,a)
         MQ=self.make_marginal_Q_kernel(self.env.transition_matrix,self.env.observation_matrix)
-        
+        #print("MQ",MQ,MQ.shape)
         # for each possible x_prim, calculate the values of the next internal-state 
         for i,x_prim in enumerate(list(self.env.observations.keys())):
             # VALUE of the next internal-state
             next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,current_possible_s)
-            
+           
+            #print("next_int",next_int_mu,x_prim,x,action)
             next_indicators=np.array(self.mu_to_index(next_int_mu))
-            
+            print(next_int_mu,next_indicators)
             if next_step==self.max_time_step:
                 next_mu_xPrim_z_value=self.value_function[-1][next_indicators]
             else:
                 
                 next_mu_xPrim_z_value=self.value_function[time_step-self.max_time_step][x_prim][next_indicators]
-            
+            print("next_mu_xp_z",next_mu_xPrim_z_value,x_prim)
         
             # PROBABILITY of the next internal-state
             
             # probability of transition to the next x' for being in y=0 or 1 and doing the given action
             y_a_to_xPrim_transitionKernel=np.array([MQ[0][action][x_prim],MQ[1][action][x_prim]])
-            
+            #print("y_a_to_xPrim_transitionKernel",y_a_to_xPrim_transitionKernel.shape,y_a_to_xPrim_transitionKernel)            
             # actual probability of reaching the next x' for actual probability of being in y=0/1 and doing the given action
             xPrim_prob=np.dot(y_probs,y_a_to_xPrim_transitionKernel)
-            
+            #print("xPrim",xPrim_prob.shape,xPrim_prob)
             # VALUE x PROBABILITY of each next x' (by current x,mu,z and a)
             next_internalState_value_each_xPrim[i]=next_mu_xPrim_z_value*xPrim_prob
-        
+            
         #sum of weighted (by probability) values of next x_prims, which in the value-iteration is the new value of current Q((x,mu,z),a) 
         current_XA_value=np.sum(next_internalState_value_each_xPrim,axis=0)
-        
+        #print("cXA",current_XA_value,action,x)
         return current_XA_value
             
     def timeStep_value_calculator(self,time_step):
@@ -727,17 +736,19 @@ class Bauerle_Rieder_agent(object):
         for x in range(len(XA_vals)):
             for action in range(len(XA_vals[x])):
                 print('x:',x,'a:',action)
+                print("int_mus",int_mus,"possible",current_possible_s)
                 XA_vals[x][action]=self.XA_value_calculator(x,action,int_mus,time_step,current_possible_s)
             
             best_values=np.max(XA_vals[x], axis=0)
             best_actions=np.argmax(XA_vals[x], axis=0)
-            
+            print("BEST",best_values,best_actions)
             
             to_V[x][current_indicators]=best_values
             to_A[x][current_indicators]=best_actions
         self.value_function.insert(0,to_V)
         self.action_function.insert(0,to_A)
-        return   
+        print("XA_vals",XA_vals,XA_vals.shape)
+        return XA_vals
 
     def reset(self,y0_prob,initiative_observation):
         '''

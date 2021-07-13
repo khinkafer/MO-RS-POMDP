@@ -58,7 +58,7 @@ class tiger_POMDP_env:
         self.transition_matrix[0][0][1]=self.pS_RL
         self.transition_matrix[1][0][0]=self.pS_LR
         self.transition_matrix[1][0][1]=1-self.pS_LR
-        
+       
         #creating reward matrix
         
         self.rewards=np.zeros((len(self.states),len(self.actions)))
@@ -79,6 +79,14 @@ class tiger_POMDP_env:
         # set observations of 'open' actions to 0.5 . Because, the 'open' actions terminate a trial and start a new one
         # so as the reward is not observable, the observation should be un-informative.
         self.observation_matrix[:]=0.5
+        # ALL other actions:
+        for i in range(1,len(self.actions)):
+            self.observation_matrix[i][0][0]=0.8
+            self.observation_matrix[i][0][1]=0.2
+            self.observation_matrix[i][1][0]=0.2
+            self.observation_matrix[i][1][1]=0.8
+
+
         
         # observations of 'listen' action ([0][state][oservation])
         # accurately observed Right
@@ -86,9 +94,9 @@ class tiger_POMDP_env:
         # noisy observation of Left while the state is Right 
         self.observation_matrix[0][0][1]=self.pO_RL
         # accurately observed Left
-        self.observation_matrix[0][1][0]=1-self.pO_LR
+        self.observation_matrix[0][1][0]=self.pO_LR
         # noisy observation of Right while the state is Leftt 
-        self.observation_matrix[0][1][1]=self.pO_LR
+        self.observation_matrix[0][1][1]=1-self.pO_LR
         self.time_step=0
         self.reset()
         return
