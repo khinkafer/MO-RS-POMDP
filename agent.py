@@ -395,6 +395,11 @@ class Bauerle_Rieder_agent(object):
         # 3. sort less than 10 (less than 1 in base of num_of_PDF_chunk) residuals from big to small
         # 4. select n biggest residuals when n equals to remaining amount of integers to have a correct probability (i.e. n= ouput of case-2)
         # 5. round-up the biggests and floor the others
+        #%TODO UGLY FIX
+        for i in range(int_say_result.shape[0]):
+            if(np.sum(int_say_result[i])==self.num_of_PDF_chunks*10):
+                int_say_result[i][np.argmax(int_say_result[i])]-=1
+
         for i,res in enumerate(int_say_result):
             b=res
             # 1
@@ -545,7 +550,7 @@ class Bauerle_Rieder_agent(object):
         # while things remain integer yet. 
         # After finding the nearest correct point in Mu-space, we are using the values in base of num_of_PDF_chunks (not base of num_of_PDF_chunks*10) 
         int_say_result=(say_result*self.num_of_PDF_chunks*10).astype(np.int8)
-        
+        print("int",int_say_result)
         #return say_result
 
         return self.nearest_grid_points(int_say_result)
@@ -667,16 +672,17 @@ class Bauerle_Rieder_agent(object):
         # for each possible x_prim, calculate the values of the next internal-state 
         for i,x_prim in enumerate(list(self.env.observations.keys())):
             # VALUE of the next internal-state
+            print("CMU",current_possible_mu)
             next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,current_possible_s)
-           
+            
             #print("next_int",next_int_mu,x_prim,x,action)
             next_indicators=np.array(self.mu_to_index(next_int_mu))
             print(next_int_mu,next_indicators)
             if next_step==self.max_time_step:
                 next_mu_xPrim_z_value=self.value_function[-1][next_indicators]
             else:
-                
-                next_mu_xPrim_z_value=self.value_function[time_step-self.max_time_step][x_prim][next_indicators]
+                print(self.value_function)
+                next_mu_xPrim_z_value=self.value_function[time_step-self.max_time_step][next_indicators]
             print("next_mu_xp_z",next_mu_xPrim_z_value,x_prim)
         
             # PROBABILITY of the next internal-state
@@ -727,30 +733,30 @@ class Bauerle_Rieder_agent(object):
         current_indicators=np.array(self.mu_to_index(int_mus))
         self.step_indexes.insert(0,current_indicators)
         
-        # value of each (x,a) pair
-        XA_vals=np.array([[np.empty(len(int_mus))]*self.num_of_actions]*self.num_of_observable_states)
-        
-        to_V=np.array([[None]*len(self.universal_int_Mu),[None]*len(self.universal_int_Mu)])
-        to_A=np.array([[None]*len(self.universal_int_Mu),[None]*len(self.universal_int_Mu)])
-        
-        for x in range(len(XA_vals)):
-            for action in range(len(XA_vals[x])):
-                print('x:',x,'a:',action)
-                print("int_mus",int_mus,"possible",current_possible_s)
-                XA_vals[x][action]=self.XA_value_calculator(x,action,int_mus,time_step,current_possible_s)
-            
-            best_values=np.max(XA_vals[x], axis=0)
-            best_actions=np.argmax(XA_vals[x], axis=0)
-            print("BEST",best_values,best_actions)
-            
-            to_V[x][current_indicators]=best_values
-            to_A[x][current_indicators]=best_actions
+        # value of each (x,a) pair; change -> (a)
+        XA_vals=np.array([np.empty(len(int_mus))]*self.num_of_actions)
+        print(XA_vals.shape)
+        to_V=np.array([None]*len(self.universal_int_Mu))
+        to_A=np.array([None]*len(self.universal_int_Mu))
+        #Not needed
+        #for x in range(len(XA_vals)):
+        for action in range(XA_vals.shape[0]):
+            print('a:',action)
+            print("int_mus",int_mus,"possible",current_possible_s)
+            XA_vals[action]=self.XA_value_calculator(0,action,int_mus,time_step,current_possible_s)
+
+        best_values=np.max(XA_vals, axis=0)
+        best_actions=np.argmax(XA_vals, axis=0)
+        print("BEST",best_values,best_actions)
+
+        to_V[current_indicators]=best_values
+        to_A[current_indicators]=best_actions
         self.value_function.insert(0,to_V)
         self.action_function.insert(0,to_A)
         print("XA_vals",XA_vals,XA_vals.shape)
         return XA_vals
 
-    def reset(self,y0_prob,initiative_observation):
+    def reset(self,initiative_observation):
         '''
         It reset the agent to its belief about the initial wealth and set time-step to zero (begining of the simulation)
         This function distributes the probability equally over different s-values of initial wealths. The difference is
@@ -769,23 +775,20 @@ class Bauerle_Rieder_agent(object):
         Noting. makes the agent ready for a new simulation.
 
         '''
-        y0_int_prob=y0_prob*self.num_of_PDF_chunks
-        if (y0_int_prob%1!=0):
-            print('bad input value!')
-            return
-        else:
-            # making a Mu-point-shape zero array
-            self.current_internal_belief=np.zeros(len(self.S)*2)
-            # set elements related to initial wealth value  
-            self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]]=y0_int_prob
-            self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]+len(self.S)]=self.num_of_PDF_chunks-y0_int_prob
-            # set time-step=0
-            self.current_internal_timeStep=0
-            # define a variable for current x
-            self.current_internal_x=initiative_observation
-            self.last_action=None
-        
-            return
+
+        # making a Mu-point-shape zero array
+        self.current_internal_belief=np.zeros(len(self.S)*2)
+        # set elements related to initial wealth value  
+
+        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]]=self.num_of_PDF_chunks*(1-initiative_observation)
+        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]+len(self.S)]=self.num_of_PDF_chunks*initiative_observation
+        # set time-step=0
+        self.current_internal_timeStep=0
+        # define a variable for current x
+        self.current_internal_x=initiative_observation
+        self.last_action=None
+
+        return
     
     def do_action(self):
         '''
@@ -813,8 +816,8 @@ class Bauerle_Rieder_agent(object):
             self.current_internal_Mu_index=self.mu_to_index(np.array([self.current_internal_belief]))
             
             # choose best action and its value from 'value_function' and 'action_function' variables 
-            best_action=self.action_function[self.current_internal_timeStep][self.current_internal_x][self.current_internal_Mu_index]
-            value_of_action=self.value_function[self.current_internal_timeStep][self.current_internal_x][self.current_internal_Mu_index]
+            best_action=self.action_function[self.current_internal_timeStep][self.current_internal_Mu_index]
+            value_of_action=self.value_function[self.current_internal_timeStep][self.current_internal_Mu_index]
             belief_at_action=self.current_internal_belief
             belief_index_at_action=self.current_internal_Mu_index
             
@@ -839,7 +842,7 @@ class Bauerle_Rieder_agent(object):
         else:     
             # possible S-values of this time-step, just to give to SAY-calculator() 
             next_step_possible_S=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,self.current_internal_timeStep)
-            
+            #print(self.current_internal_x,self.last_action,)
             # update the current Mu
             self.current_internal_belief=self.say_calculator(x=self.current_internal_x,
                                 action=self.last_action,
