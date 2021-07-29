@@ -4,6 +4,7 @@ import sys
 import gc
 import os
 from env import *
+from tqdm import tqdm
 
 
 
@@ -78,8 +79,13 @@ class Bauerle_Rieder_agent(object):
         # ############### Make Mu-Space
         
         # generate all possible s-values (wealth values) during the experiment with maximum trial equal to max_time_step
-        self.S=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,self.max_time_step)
-        
+        print("Generation Possible Wealths")
+        self.S=self.generate_possible_wealths(np.unique(self.env.rewards),
+                                              self.initial_wealth,
+                                              self.env.discount_factor,
+                                              self.max_time_step)
+        print("Length S",len(self.S))
+            
         # make the path of saving the universal Mu-space. 
         # By universal-Mu we mean that a disceretized Mu-space (over y and s) which covers all 
         # possible values of s during the eperiment when the maximum depth is max_time_step 
@@ -120,8 +126,8 @@ class Bauerle_Rieder_agent(object):
             
             # number of elements per file
             file_step_size=int(len(self.universal_int_Mu)/num_of_files)
-            
-            for i in range(num_of_files):
+            print("Number of Files")
+            for i in tqdm(range(num_of_files)):
                 # indicator is somehow an index of a specific probability dist. over Mu-space 
                 indicator=np.arange(file_step_size*i,file_step_size*(i+1))
                 # content of files are dictionaries with keys: different possible distributions over Mu, and values: index/indicator
@@ -156,7 +162,7 @@ class Bauerle_Rieder_agent(object):
         '''
         self.utility_function=utility_function
         # it used max_time_step and universal_int_Mu as a global variable
-        for time_step in range(self.max_time_step,-1,-1):
+        for time_step in tqdm(range(self.max_time_step,-1,-1)):
             print('step:',time_step)
             
             if (time_step==self.max_time_step):
@@ -258,7 +264,9 @@ class Bauerle_Rieder_agent(object):
         # generate all possible combinations of discrete PDFs by a recursive function
         num=0
         combinations={}
-        self.add_combinations(coded_pdf,combinations,[num])
+        n = 200000 # How many 
+        bar = tqdm()
+        self.add_combinations(coded_pdf,combinations,[num],bar)
         
         possible_PDF_dists=[[ord(point)-200 for point in PDFcomb] for PDFcomb in combinations.keys()]
         possible_PDF_dists=np.array(possible_PDF_dists)
@@ -266,7 +274,7 @@ class Bauerle_Rieder_agent(object):
         #possible_PDF_dists=possible_PDF_dists*(1./pdf_chunks_counts)
         return possible_int_dists
     
-    def add_combinations(self,base,combs,num):
+    def add_combinations(self,base,combs,num,bar):
         '''
         It adds a given combination(base) to the 'combs' dictionary (if it was not redundant). Then, generates different
         combinations (based-on 'base') and calls itself to do this things on them. 
@@ -287,6 +295,7 @@ class Bauerle_Rieder_agent(object):
         None.
 
         '''
+        bar.update(1)
         # remove redundant combinations
         if base in combs:
             return
@@ -308,7 +317,7 @@ class Bauerle_Rieder_agent(object):
                 if next_pdf[0]<0:
                     pass
                 else:
-                    self.add_combinations('%s' % coded_pdf,combs,num)
+                    self.add_combinations('%s' % coded_pdf,combs,num,bar)
 
     def make_Q_kernel(self,transition_matrix,observation_matrix):
         '''
@@ -427,6 +436,7 @@ class Bauerle_Rieder_agent(object):
         return int_say_result
 
     def say_calculator(self,x,action,x_prim,current_int_mu,z,current_possible_s):
+
         '''
         It applied the SAY updating rule to Mu-space.
 
@@ -501,11 +511,12 @@ class Bauerle_Rieder_agent(object):
         next_mus=[for_y0,for_y1]
         
         # tmp_mus[0] for y=0 and tmp_mus[1] for y=1 calculations
+
         tmp_mus=np.zeros((2,len(mus),len(mus[0])))
         
         # for each current state
         for y,y_mus in enumerate(tmp_mus):
-            
+
             # mus_ys is Mu-beliefs about being in a staet (y)
             # probability of reaching y_prim=0
             y_mus[:,:len(self.S)]=mus_ys[y]*q[y][action][y_prim0][x_prim]
@@ -521,13 +532,15 @@ class Bauerle_Rieder_agent(object):
             
             # indexes of S axis which has value in this SAY calculation
             current_s_indexes=np.where(np.isin(self.S,current_possible_s)==True)[0]
-            # indexes of S axis which which would be the successor, after current S-values recieving c(y,a) 
+            # indexes of S axis which which would be the successor, after current S-values recieving c(y,a)
+
             next_s_indexes=np.where(np.isin(self.S,next_possible_s)==True)[0]
             
             
             #tmp=np.zeros((len(mus),len(mus[0]))).astype(np.int8)
             #assign Mu-probability to each possible S(=previous_s + c) point
             # for S points in y_prim=0        
+
             next_mus[y][:,next_s_indexes]=y_mus[:,current_s_indexes]
             # for S points in y_prim=1
             next_mus[y][:,next_s_indexes+len(self.S)]=y_mus[:,current_s_indexes+len(self.S)]
@@ -550,7 +563,7 @@ class Bauerle_Rieder_agent(object):
         # while things remain integer yet. 
         # After finding the nearest correct point in Mu-space, we are using the values in base of num_of_PDF_chunks (not base of num_of_PDF_chunks*10) 
         int_say_result=(say_result*self.num_of_PDF_chunks*10).astype(np.int8)
-        print("int",int_say_result)
+        #print("int",int_say_result)
         #return say_result
 
         return self.nearest_grid_points(int_say_result)
@@ -573,7 +586,7 @@ class Bauerle_Rieder_agent(object):
             utility_mapped_values=self.S
         else:
             pass
-        print("Self.S",self.S)
+        #print("Self.S",self.S)
         # duplicate utility values to cover Y-dimension of the Mu-space
         utility_mapped_values=np.tile(utility_mapped_values,2)
         
@@ -653,7 +666,7 @@ class Bauerle_Rieder_agent(object):
         '''
     
         next_step=time_step+1
-        z=np.power(self.env.gamma,time_step)
+        z=np.power(self.env.discount_factor,time_step)
         
         # %TODO x = 0 right, x=1 left
         # value of the next internal-state (internal-state=(X,Mu,Z) )
@@ -672,18 +685,18 @@ class Bauerle_Rieder_agent(object):
         # for each possible x_prim, calculate the values of the next internal-state 
         for i,x_prim in enumerate(list(self.env.observations.keys())):
             # VALUE of the next internal-state
-            print("CMU",current_possible_mu)
+            #print("CMU",current_possible_mu)
             next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,current_possible_s)
             
             #print("next_int",next_int_mu,x_prim,x,action)
             next_indicators=np.array(self.mu_to_index(next_int_mu))
-            print(next_int_mu,next_indicators)
+            #print(next_int_mu,next_indicators)
             if next_step==self.max_time_step:
                 next_mu_xPrim_z_value=self.value_function[-1][next_indicators]
             else:
-                print(self.value_function)
+                #print(self.value_function)
                 next_mu_xPrim_z_value=self.value_function[time_step-self.max_time_step][next_indicators]
-            print("next_mu_xp_z",next_mu_xPrim_z_value,x_prim)
+            #print("next_mu_xp_z",next_mu_xPrim_z_value,x_prim)
         
             # PROBABILITY of the next internal-state
             
@@ -735,25 +748,25 @@ class Bauerle_Rieder_agent(object):
         
         # value of each (x,a) pair; change -> (a)
         XA_vals=np.array([np.empty(len(int_mus))]*self.num_of_actions)
-        print(XA_vals.shape)
+        #print(XA_vals.shape)
         to_V=np.array([None]*len(self.universal_int_Mu))
         to_A=np.array([None]*len(self.universal_int_Mu))
         #Not needed
         #for x in range(len(XA_vals)):
         for action in range(XA_vals.shape[0]):
-            print('a:',action)
-            print("int_mus",int_mus,"possible",current_possible_s)
+            #print('a:',action)
+            #print("int_mus",int_mus,"possible",current_possible_s)
             XA_vals[action]=self.XA_value_calculator(0,action,int_mus,time_step,current_possible_s)
 
         best_values=np.max(XA_vals, axis=0)
         best_actions=np.argmax(XA_vals, axis=0)
-        print("BEST",best_values,best_actions)
+        #print("BEST",best_values,best_actions)
 
         to_V[current_indicators]=best_values
         to_A[current_indicators]=best_actions
         self.value_function.insert(0,to_V)
         self.action_function.insert(0,to_A)
-        print("XA_vals",XA_vals,XA_vals.shape)
+        #print("XA_vals",XA_vals,XA_vals.shape)
         return XA_vals
 
     def reset(self,initiative_observation):
@@ -848,7 +861,7 @@ class Bauerle_Rieder_agent(object):
                                 action=self.last_action,
                                 x_prim=new_observation,
                                 current_int_mu=np.array([self.current_internal_belief]),
-                                z=np.power(self.env.gamma,self.current_internal_timeStep),
+                                z=np.power(self.env.discount_factor,self.current_internal_timeStep),
                                 current_possible_s=next_step_possible_S)
             
             # increase time-step
