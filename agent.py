@@ -5,8 +5,8 @@ import gc
 import os
 from env import *
 from tqdm import tqdm
-
-
+from copy import copy
+import scipy.special
 
 class Bauerle_Rieder_agent(object):
     
@@ -141,7 +141,7 @@ class Bauerle_Rieder_agent(object):
             np.save(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(num_of_files)+'.npy'),d)
         return
     
-    def value_iteration(self,utility_function='risk-neutral'):
+    def value_iteration(self,utility_function):
         '''
         This function starts value iteration process backward (from last time-step to first step) and 
         in each step it adds the values and best action of all internal-states(x,Mu,z) in that time-step to 
@@ -223,6 +223,35 @@ class Bauerle_Rieder_agent(object):
                 values=np.unique(np.append(values,tmp_values))   
         return values
     
+    #https://www.geeksforgeeks.org/find-all-combinations-that-adds-upto-given-number-2/
+    def findCombinationsUtil(self,final,arr, index, num,
+                                  reducedNum):
+        if (reducedNum < 0):
+            return
+        if (reducedNum == 0):
+            final.append(copy(np.array(arr)[:index]))
+            return 
+        prev = 1 
+        for k in range(prev, num + 1):
+            arr[index] = k
+            self.findCombinationsUtil(final,arr, index + 1, num, reducedNum - k)
+    def findCombinations(self,n):
+        arr = [0] * n
+        final = []
+        self.findCombinationsUtil(final,arr, 0, n, n)
+        return final
+
+    def get_number_of_chunks(self):
+        sum = 0
+        wlth = self.generate_possible_wealths(np.unique(self.env.rewards),
+                                              self.initial_wealth,
+                                              self.env.discount_factor,
+                                              self.max_time_step)
+        for i in self.findCombinations(self.num_of_PDF_chunks):
+            sum += scipy.special.binom(len(wlth)*2, len(i))
+        return sum
+    
+    
     def chunk_mu(self,Y,S,pdf_chunks_counts):
         '''
         This function does two things together:
@@ -264,8 +293,7 @@ class Bauerle_Rieder_agent(object):
         # generate all possible combinations of discrete PDFs by a recursive function
         num=0
         combinations={}
-        n = 200000 # How many 
-        bar = tqdm()
+        bar = tqdm(total=self.get_number_of_chunks())
         self.add_combinations(coded_pdf,combinations,[num],bar)
         
         possible_PDF_dists=[[ord(point)-200 for point in PDFcomb] for PDFcomb in combinations.keys()]
@@ -306,6 +334,7 @@ class Bauerle_Rieder_agent(object):
             
             # decode the base
             base_pdf=[ord(p)-200 for p in base]
+
             # making base's childs
             for candidate in range(1,len(base)):
                 # making the next input for recursion
@@ -568,7 +597,7 @@ class Bauerle_Rieder_agent(object):
 
         return self.nearest_grid_points(int_say_result)
 
-    def last_step_RS_value(self ):
+    def last_step_RS_value(self):
         '''
         This function gets universal-Mu (possible Mus at the final stage of the task), as well as the type of utility function (utility function: a mapping of 
         S-values to different utility values). The default is risk-neutral which means utilityValues=S-Values. Any other utility function should be implemented here.
@@ -582,10 +611,8 @@ class Bauerle_Rieder_agent(object):
 
         '''
         # apply utility function on different wealth values
-        if self.utility_function=='risk-neutral':
-            utility_mapped_values=self.S
-        else:
-            pass
+        utility_mapped_values=self.utility_function(self.S)
+
         #print("Self.S",self.S)
         # duplicate utility values to cover Y-dimension of the Mu-space
         utility_mapped_values=np.tile(utility_mapped_values,2)
@@ -754,7 +781,7 @@ class Bauerle_Rieder_agent(object):
         #Not needed
         #for x in range(len(XA_vals)):
         for action in range(XA_vals.shape[0]):
-            #print('a:',action)
+            print('a:',action)
             #print("int_mus",int_mus,"possible",current_possible_s)
             XA_vals[action]=self.XA_value_calculator(0,action,int_mus,time_step,current_possible_s)
 
@@ -769,7 +796,7 @@ class Bauerle_Rieder_agent(object):
         #print("XA_vals",XA_vals,XA_vals.shape)
         return XA_vals
 
-    def reset(self,initiative_observation):
+    def reset(self,initiative_observation=0):
         '''
         It reset the agent to its belief about the initial wealth and set time-step to zero (begining of the simulation)
         This function distributes the probability equally over different s-values of initial wealths. The difference is
@@ -793,8 +820,8 @@ class Bauerle_Rieder_agent(object):
         self.current_internal_belief=np.zeros(len(self.S)*2)
         # set elements related to initial wealth value  
 
-        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]]=self.num_of_PDF_chunks*(1-initiative_observation)
-        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]+len(self.S)]=self.num_of_PDF_chunks*initiative_observation
+        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]]=np.floor(self.num_of_PDF_chunks/2)
+        self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]+len(self.S)]=np.ceil(self.num_of_PDF_chunks/2)
         # set time-step=0
         self.current_internal_timeStep=0
         # define a variable for current x
