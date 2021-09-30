@@ -7,8 +7,8 @@ import numpy as np
 
 class tiger_POMDP_env:
     
-    states={0:"tiger_right",
-            1:"tiger_left"}
+    states={0:"tiger_left",
+            1:"tiger_right"}
     
     actions={"listen":0,
              "open_right_low":1,
@@ -16,8 +16,8 @@ class tiger_POMDP_env:
              "open_right_high":3,
              "open_left_high":4,}
     
-    observations={0: "sound_right",
-                  1: "soud_left"}
+    observations={0: "soud_left",
+                  1: "soud_right"}
     def __init__(self,read_config,config_address,parameters=None):
         '''
         read_config determines wheteher we want to read environment parameters from a .json file (read_config==True) 

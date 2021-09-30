@@ -616,7 +616,7 @@ class Bauerle_Rieder_agent(object):
         #print("Self.S",self.S)
         # duplicate utility values to cover Y-dimension of the Mu-space
         utility_mapped_values=np.tile(utility_mapped_values,2)
-        
+        print("MAPPED_VALUES",utility_mapped_values)
         # value of a Mu-point calculated as (probability of being in that S, regardless of y- or Mu(s)) x (utility value of that amount of wealth-or U(s))
         # the formula in the papaer is: integral(integral(Us)) Mu(ds,dy) which is equal above formula
         # Note: Here we trasform the integer mu-values to the dicretized floating poits value between 0 and 1
