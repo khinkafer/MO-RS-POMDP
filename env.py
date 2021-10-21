@@ -47,7 +47,7 @@ class tiger_POMDP_env:
         self.gamma=params['discount_factor']
         self.initial_wealth=params['initial_wealth']
         self.discount_factor=self.gamma
-        
+        print(params)
         # creating transition function matrix
         
         self.transition_matrix=np.zeros((len(self.states),len(self.actions),len(self.states)))
@@ -64,14 +64,15 @@ class tiger_POMDP_env:
         self.rewards=np.zeros((len(self.states),len(self.actions)))
         # listening cost
         self.rewards[:,0]=self.c_0
-        # correct and low
-        self.rewards[0,1]=self.rewards[1,2]=self.r_l
+        ############################################## change!
         # incorrect and low
-        self.rewards[0,2]=self.rewards[1,1]=self.c_l
-        # correct and high
-        self.rewards[0,3]=self.rewards[1,4]=self.r_h
+        self.rewards[0,1]=self.rewards[1,2]=self.c_l
+        # correct and low
+        self.rewards[0,2]=self.rewards[1,1]=self.r_l
         # incorrect and high
-        self.rewards[0,4]=self.rewards[1,3]=self.c_h
+        self.rewards[0,3]=self.rewards[1,4]=self.c_h
+        # correct and high
+        self.rewards[0,4]=self.rewards[1,3]=self.r_h
         
         # creating observation matrix
         
@@ -85,10 +86,11 @@ class tiger_POMDP_env:
         self.observation_matrix[0][0][0]=1-self.pO_RL
         # noisy observation of Left while the state is Right 
         self.observation_matrix[0][0][1]=self.pO_RL
+        ########################################################################### A Change!
         # accurately observed Left
-        self.observation_matrix[0][1][0]=1-self.pO_LR
+        self.observation_matrix[0][1][0]=self.pO_LR
         # noisy observation of Right while the state is Leftt 
-        self.observation_matrix[0][1][1]=self.pO_LR
+        self.observation_matrix[0][1][1]=1-self.pO_LR
         self.time_step=0
         self.reset()
         return

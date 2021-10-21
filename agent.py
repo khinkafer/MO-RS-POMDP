@@ -398,8 +398,8 @@ class Bauerle_Rieder_agent(object):
             c=np.array(b/10).astype(np.int8)
             #2
             d=self.num_of_PDF_chunks-c.sum()
-            if d==0:
-                pass
+            if d==0: ############################################# change!
+                int_say_result[i]=c
             else:
                 #3
                 reminders=np.array(b%10).astype(np.int8) 
@@ -542,6 +542,7 @@ class Bauerle_Rieder_agent(object):
         int_say_result=(say_result*self.num_of_PDF_chunks*10).astype(np.int8)
         
         #return say_result
+        
         return self.nearest_grid_points(int_say_result)
 
     def last_step_RS_value(self ):
@@ -561,7 +562,10 @@ class Bauerle_Rieder_agent(object):
         if self.utility_function=='risk-neutral':
             utility_mapped_values=self.S
         else:
-            pass
+            ###################### should impelement generally, but:
+
+            utility_mapped_values= (1/self.utility_function)* (1-np.exp(np.multiply(-self.S,self.utility_function)))
+            
         
         # duplicate utility values to cover Y-dimension of the Mu-space
         utility_mapped_values=np.tile(utility_mapped_values,2)
@@ -662,7 +666,10 @@ class Bauerle_Rieder_agent(object):
             next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,current_possible_s)
             
             next_indicators=np.array(self.mu_to_index(next_int_mu))
-            
+            #print('====')
+            #print(x_prim)
+            #print(next_int_mu)
+            #print (next_indicators)
             if next_step==self.max_time_step:
                 next_mu_xPrim_z_value=self.value_function[-1][next_indicators]
             else:
@@ -726,12 +733,21 @@ class Bauerle_Rieder_agent(object):
         
         for x in range(len(XA_vals)):
             for action in range(len(XA_vals[x])):
-                print('x:',x,'a:',action)
+                #print('x:',x,'a:',action)
                 XA_vals[x][action]=self.XA_value_calculator(x,action,int_mus,time_step,current_possible_s)
+                #print('s:',current_possible_s)
+                #print('time_step:',time_step)
+                #print('mu:',int_mus)
+                #print(XA_vals[x][action])
+                #print('00000000000000000000000000000000000000000000000000000000000000000000000000000')
             
             best_values=np.max(XA_vals[x], axis=0)
             best_actions=np.argmax(XA_vals[x], axis=0)
+            #print('best_values:',best_values)
+            #print('best action:',best_actions)
             
+            #rint(XA_vals)
+            #print('00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  ')
             
             to_V[x][current_indicators]=best_values
             to_A[x][current_indicators]=best_actions
@@ -773,6 +789,18 @@ class Bauerle_Rieder_agent(object):
             # define a variable for current x
             self.current_internal_x=initiative_observation
             self.last_action=None
+            
+            # for simulation
+            beliefs_preview=np.tile(self.S,(3,1))
+            #print( beliefs_preview)
+            #print( self.current_internal_belief[:len(self.S)])
+            beliefs_preview[1]=np.divide(self.current_internal_belief[:len(self.S)],self.num_of_PDF_chunks)
+            beliefs_preview[2]=np.divide(self.current_internal_belief[len(self.S):],self.num_of_PDF_chunks)
+            
+            print('initial beliefs:')
+            print(beliefs_preview)
+            print('initial internal state(observation):',self.current_internal_x)
+            
         
             return
     
@@ -809,8 +837,14 @@ class Bauerle_Rieder_agent(object):
             
             # record the choosen action to use in updating function
             self.last_action=best_action[0]
-
-            return best_action[0],value_of_action[0],belief_at_action/self.num_of_PDF_chunks
+            
+            # for simulation
+            beliefs_preview=np.tile(self.S,(3,1))
+            beliefs_preview[1]=belief_at_action[:len(self.S)]/self.num_of_PDF_chunks
+            beliefs_preview[2]=belief_at_action[len(self.S):]/self.num_of_PDF_chunks
+            
+            #return best_action[0],value_of_action[0],belief_at_action/self.num_of_PDF_chunks
+            return best_action[0],value_of_action[0],beliefs_preview
         
     def update_agent(self,new_observation):
         '''
@@ -842,7 +876,14 @@ class Bauerle_Rieder_agent(object):
             
             # update current observable-state 
             self.current_internal_x=new_observation
-            return
+            
+            # for simulation
+            new_beliefs=np.array(self.current_internal_belief).reshape(-1)
+            new_beliefs_preview=np.tile(self.S,(3,1))
+            new_beliefs_preview[1]=np.divide(new_beliefs[:len(self.S)],self.num_of_PDF_chunks)
+            new_beliefs_preview[2]=np.divide(new_beliefs[len(self.S):],self.num_of_PDF_chunks)
+            
+            return new_beliefs_preview
         
         
         
