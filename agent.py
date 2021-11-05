@@ -135,7 +135,7 @@ class Bauerle_Rieder_agent(object):
             np.save(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(num_of_files)+'.npy'),d)
         return
     
-    def value_iteration(self,utility_function='risk-neutral'):
+    def value_iteration(self,utility_function='risk-neutral',save_results=True,load_results=True,depth_and_chunks=None):
         '''
         This function starts value iteration process backward (from last time-step to first step) and 
         in each step it adds the values and best action of all internal-states(x,Mu,z) in that time-step to 
@@ -148,12 +148,45 @@ class Bauerle_Rieder_agent(object):
             Here, by determining the utility function, we can produce the risk-sensitivity. This variable will
             be passed to 'last_step_RS_value()' function, which applies te utility func. on the final wealths of
             the experiment. The default is 'risk-neutral'.
+            
+        save_reults : Boolean
+            To save the calculated reults (value_function, action_function and step_indexes) in 'Value_iteration_results' directory. 
+            Because the value iteration calculations also depend on depth and number of chunks, we made specific folders (in regard depth and chunkNumber )in the main results folder ( e.g.: Value_iteration_results\d2c8\ ).
+            
+        load_results : Boolean
+            To load calculated value_function, action_function and step_indexses.
+            
+        depth_and_chunks : String
+            To specify depth of planning and number of chunking points. It uses both in loading path.
 
         Returns
         -------
         None.
 
         '''
+        
+        # Reading the pre calculated value_function, action_function, and possible_indexes    
+        if load_results:
+            vr_dir=os.path.join(os.getcwd(),'Value_iteration_results')
+            # if there is any pre-calculated results
+            if (os.path.isdir(vr_dir)):
+                # if there is results of specified Depth and Chunk_numbers. (e.g.: d2c8 means: depth of planninng equal to 2 and number of chunk points = 8 )
+                vr_dc_dir=os.path.join(vr_dir,depth_and_chunks)
+                if (os.path.isdir(vr_dc_dir)):
+                    # load files
+                    self.value_function=np.load(os.path.join(vr_dc_dir,'value_func.npy'),allow_pickle=True)
+                    self.action_function=np.load(os.path.join(vr_dc_dir,'action_func.npy'),allow_pickle=True)
+                    self.step_indexes=np.load(os.path.join(vr_dc_dir,'step_idx.npy'),allow_pickle=True)
+                    return                  
+                else:
+                    print('Data of the specified depth or chunk_number was not found!')
+                    return 
+            else:
+                print('There is no saved data!')
+                return
+                
+        
+        
         self.utility_function=utility_function
         # it used max_time_step and universal_int_Mu as a global variable
         for time_step in range(self.max_time_step,-1,-1):
@@ -172,6 +205,33 @@ class Bauerle_Rieder_agent(object):
                 # any other time-step
                 self.timeStep_value_calculator(time_step)
                 print('------')
+                
+        # save results
+        if save_results:
+            # making directory paths
+            vr_dir=os.path.join(os.getcwd(),'Value_iteration_results')  
+            if not os.path.exists(vr_dir):
+                os.makedirs(vr_dir)
+            
+            setting=('d'+str(self.max_time_step)+'c'+str(self.num_of_PDF_chunks))
+            vr_dc_dir=os.path.join(vr_dir,setting)           
+            if not os.path.exists(vr_dc_dir):
+                os.makedirs(vr_dc_dir)
+                
+            # making file paths    
+            v_path=os.path.join(vr_dc_dir,'value_func')
+            a_path=os.path.join(vr_dc_dir,'action_func')
+            i_path=os.path.join(vr_dc_dir,'step_idx')
+            
+            # saving calculated data
+            np.save(v_path,self.value_function)
+            np.save(a_path,self.action_function)
+            np.save(i_path,self.step_indexes)
+        else:
+            
+            # load pre-calculated universal_Mu
+            self.universal_int_Mu=np.load(file_path)
+            
         return
     
     
@@ -844,6 +904,7 @@ class Bauerle_Rieder_agent(object):
             beliefs_preview[2]=belief_at_action[len(self.S):]/self.num_of_PDF_chunks
             
             #return best_action[0],value_of_action[0],belief_at_action/self.num_of_PDF_chunks
+            
             return best_action[0],value_of_action[0],beliefs_preview
         
     def update_agent(self,new_observation):
