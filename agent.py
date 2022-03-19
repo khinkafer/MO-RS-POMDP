@@ -33,13 +33,14 @@ class Bauerle_Rieder_agent(object):
         # each element in value_function[t][x] is a value number related to a specific Mu-value: value_function[t0][x0][Mu0]= value of (x0,Mu0,z) at t0 
         # Note 1: variable Z actually represents the time-step, so we can easilly see (x,Mu,z) as (x,Mu,t); so, z=discount_factor ^ t  
         # Note 2: values will be calculated for all possible Mu-values at a time-step and it restore in an ordered array 
-        # with length equal to all possible Mu-values overally. So, to find no_None indexes in the value function (as well as
-        # in the action_function) and having access to their actual Mu-value representation, the possible values in each time-step 
-        # are stored in 'step_indexes' variable
+        # with length equal to all possible Mu-values in that time step.
         # Note 3: final time-step values is a 1-D array. because the final value is indipendant from x.( saving was redundant)
+        # Note 4: In our experiment, the observable part of state (x) is equal to Observation. So, calculating and saving the value function for both x=0 and x=1 was redundant (because the effect of 
+        # the observation has already applied in Mu-transfer and has no other effects). But, in sake of generality we calculate and saved value function for both observations seperately.
         self.value_function=[]
         # like as value_function, but for the best action of that state. best means actin with maximum reward.
         self.action_function=[]
+        # it is redundant to new version of the code
         # indexes of possible Mu-values in each time-step. final step is fully complete and mapped with universal_Mu indexes, so not saved.
         self.step_indexes=[]
         
@@ -54,7 +55,7 @@ class Bauerle_Rieder_agent(object):
         
         return
     
-    def pre_planning_paration(self,make_and_save_Mu=True,save_Mu2index_chunks=True):
+    def pre_planning_paration(self,make_and_save_Mu=True):
         '''
         
         This function generates all possible wealths levels(S), the Mu-space(PDF over S and Y) 
@@ -63,9 +64,8 @@ class Bauerle_Rieder_agent(object):
         Parameters
         ----------
         make_and_save_Mu : Boolean, optional
-            calculate and save Mu-space or just load it from a file. The default is True.
-        save_Mu2index_chunks : Boolean, optional
-            save chunked Mu-to-index mappings. The default is True.
+            calculate and save Mu-space or just load it from files. The default is True.
+        
 
         Returns
         -------
@@ -78,63 +78,72 @@ class Bauerle_Rieder_agent(object):
         # ############### Make Mu-Space
         
         # generate all possible s-values (wealth values) during the experiment with maximum trial equal to max_time_step
-        self.S=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,self.max_time_step)
+        self.S=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,self.max_time_step,comparison_precision=1.0e-3)
         
         # make the path of saving the universal Mu-space. 
         # By universal-Mu we mean that a disceretized Mu-space (over y and s) which covers all 
         # possible values of s during the eperiment when the maximum depth is max_time_step 
-        path=os.path.join(os.getcwd(),'Universal_Mu')
-        file_path=os.path.join(path,'time_step'+str(self.max_time_step)+'.npy')
+        self.universal_Mu_path=os.path.join(os.getcwd(),'Universal_Mu')
+        #file_path=os.path.join(path,'time_step'+str(self.max_time_step)+'.npy')
         # path of save/load Mu-to-index dictionary chunked files
         self.Mu_chunks_path=os.path.join(os.getcwd(),'Universal_Mu_chunks')
         
         if make_and_save_Mu==True:
-            # generate all possible probability distributions over possible s_values(wealth) and possible y-values (real state) with quantization step-size equal to 1/num_of_PDF_chunks
-            # note: the number of possible values of distribution is num_of_PDF_chunks +1 (e.g: if num_of_PDF_chunks=2 then possible probability values are : {0,0.5,1} ) 
-            # note2: possible probability values are expressed in integer numbers in the base of b=num_of_PDF_chunks+1 (e.g: if num_of_PDF_chunks=2 then possible integer
-            # probability values are : {0,1,2} ). This is because avoiding float variables, therefor more efficient memory allocation as well faster computionas.
-            self.universal_int_Mu=self.chunk_mu([0,1],self.S,self.num_of_PDF_chunks)
             
-            # ############## Save/Load Mu-Space
-    
-            # save the universal Mu space           
-            path=os.path.join(os.getcwd(),'Universal_Mu')
-            if not os.path.exists(path):
-                os.makedirs(path)
-            np.save(file_path,self.universal_int_Mu)
-        else:
             
-            # load pre-calculated universal_Mu
-            self.universal_int_Mu=np.load(file_path)
-        
-        if save_Mu2index_chunks==True:
+            for step in range(self.max_time_step+1):
+                
+                # generate all possible probability distributions over possible s_values(wealth) and possible y-values (real state) with quantization step-size equal to 1/num_of_PDF_chunks
+                # note: the number of possible values of distribution is num_of_PDF_chunks +1 (e.g: if num_of_PDF_chunks=2 then possible probability values are : {0,0.5,1} ) 
+                # note2: possible probability values are expressed in integer numbers in the base of b=num_of_PDF_chunks+1 (e.g: if num_of_PDF_chunks=2 then possible integer
+                # probability values are : {0,1,2} ). This is because avoiding float variables, therefor more efficient memory allocation as well faster computionas.
+                
+                self.universal_int_Mu=self.chunk_mu([0,1],self.S[step],self.num_of_PDF_chunks)
             
-            # ############# Save dictionaries of {Mu-Space:indicator_number}
-            #check if the directory exists and if not, make it
-            if not os.path.exists(self.Mu_chunks_path):
-                os.makedirs(self.Mu_chunks_path)
-            # number of files to split the whole Mu-space. 
-            # here I used (num_of_PDF_chunks * max_time_step) as a number proportionate to size of universal-Mu 
-            # Note: the actual number of files is often one more than this number (num_of_files+1) 
-            num_of_files=self.num_of_PDF_chunks * self.max_time_step
+                # ############## Save Mu-Space
+
+                # save the universal Mu space           
+                if not os.path.exists(self.universal_Mu_path):
+                    os.makedirs(self.universal_Mu_path)
+                file_path=os.path.join(self.universal_Mu_path,'time_step_'+str(step)+'.npy')
+                np.save(file_path,self.universal_int_Mu)
+                
+                
+                # Here, we make some dictionaries which their keys are elements of Mu-space variable (each of them represents a particular possible PDF over Mu-space) and their values are their index in their related Mu-space(based-on the time step).  
+                # We use this technique to have a fast search in value iteration, when we want to find the index of next iteration's mu-value.
+                # ############# Save dictionaries of {Mu-Space:indicator_number}
+                
+                #check if the directory exists and if not, make it
+                if not os.path.exists(self.Mu_chunks_path):
+                    os.makedirs(self.Mu_chunks_path)
+                    
+                # to prevent saving a huge file of the Mu-space in Hard disk, we chunk it to several files. If the length of the file is less than 10000 we use just one file. If not, as the size of Mu space increases in each step, we use the
+                # below formula (step x numb_of_PDF_chunks) to reach a convinient number of files. (the actuak number is 1 more file becasue of the residuals). 
+                if len(self.universal_int_Mu)<10000:
+                    num_of_files=1
+                    # number of elements per file
+                    file_step_size=len(self.universal_int_Mu)
+                else:
+                    num_of_files=step*self.num_of_PDF_chunks
+                    # number of elements per file
+                    file_step_size=int(len(self.universal_int_Mu)/num_of_files)
+                
+                
+                for i in range(num_of_files):
+                    # indicator is somehow an index of a specific probability dist. over Mu-space 
+                    indicator=np.arange(file_step_size*i,file_step_size*(i+1))
+                    # content of files are dictionaries with keys: different possible distributions over Mu, and values: index/indicator
+                    d=dict(zip(list(map(tuple,self.universal_int_Mu[file_step_size*i:file_step_size*(i+1)])),indicator))  
+                    # save data. In case of lack of memory: maybe there is a more effient model of saving data
+                    np.save(os.path.join(self.Mu_chunks_path,'step_'+str(step)+'_chunk_'+str(i)+'.npy'),d)
+
+                # Do things for the last chunk of Mu-points    
+                if (file_step_size*num_of_files)<len(self.universal_int_Mu):
+                    indicator=np.arange(file_step_size*num_of_files,len(self.universal_int_Mu))
+                    d=dict(zip(list(map(tuple,self.universal_int_Mu[file_step_size*num_of_files:len(self.universal_int_Mu)])),indicator))
+                    np.save(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(num_of_files)+'.npy'),d)
             
-            # number of elements per file
-            file_step_size=int(len(self.universal_int_Mu)/num_of_files)
-            
-            for i in range(num_of_files):
-                # indicator is somehow an index of a specific probability dist. over Mu-space 
-                indicator=np.arange(file_step_size*i,file_step_size*(i+1))
-                # content of files are dictionaries with keys: different possible distributions over Mu, and values: index/indicator
-                d=dict(zip(list(map(tuple,self.universal_int_Mu[file_step_size*i:file_step_size*(i+1)])),indicator))    
-                # save data. In case of lack of memory: maybe there is a more effient model of saving data
-                np.save(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(i)+'.npy'),d)
-            
-            # Do things for the last chunk of Mu-points    
-            indicator=np.arange(file_step_size*num_of_files,len(self.universal_int_Mu))
-            d=dict(zip(list(map(tuple,self.universal_int_Mu[file_step_size*num_of_files:len(self.universal_int_Mu)])),indicator))
-            np.save(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(num_of_files)+'.npy'),d)
         return
-    
     def value_iteration(self,utility_function='risk-neutral',save_results=True,load_results=True,depth_and_chunks=None):
         '''
         This function starts value iteration process backward (from last time-step to first step) and 
@@ -157,7 +166,7 @@ class Bauerle_Rieder_agent(object):
             To load calculated value_function, action_function and step_indexses.
             
         depth_and_chunks : String
-            To specify depth of planning and number of chunking points. It uses both in loading path.
+            To specify depth of planning and number of chunking points. It uses in loading path.
 
         Returns
         -------
@@ -186,7 +195,7 @@ class Bauerle_Rieder_agent(object):
                 return
                 
         
-        
+        #####=====================================================   main part
         self.utility_function=utility_function
         # it used max_time_step and universal_int_Mu as a global variable
         for time_step in range(self.max_time_step,-1,-1):
@@ -205,7 +214,8 @@ class Bauerle_Rieder_agent(object):
                 # any other time-step
                 self.timeStep_value_calculator(time_step)
                 print('------')
-                
+        # ========================================================
+        
         # save results
         if save_results:
             # making directory paths
@@ -227,20 +237,19 @@ class Bauerle_Rieder_agent(object):
             np.save(v_path,self.value_function)
             np.save(a_path,self.action_function)
             np.save(i_path,self.step_indexes)
-        else:
-            
-            # load pre-calculated universal_Mu
-            self.universal_int_Mu=np.load(file_path)
+        ##else:
+        ##    
+        ##    # load pre-calculated universal_Mu
+        ##    self.universal_int_Mu=np.load(file_path)
             
         return
     
     
-    def generate_possible_wealths(self,cost_reward_values,initial_wealth,discount_factor,trials):
+    def generate_possible_wealths(self,cost_reward_values,initial_wealth,discount_factor,trials,comparison_precision=1.0e-3):
         '''
         
         It Generates all possible (unique) amounts of cost/reward combinations during the trials.S-dimension of Mu. 
          
-        FOR NOW: it generates all possible combinations in all time-steps, but I should make it more efficient
 
         Parameters
         ----------
@@ -250,29 +259,44 @@ class Bauerle_Rieder_agent(object):
             Gamma value (Beta in the paper).
         trials : int
             indicates the depth of decision-making and consequently number of possible wealth amounts .
-
+        comparison_precision: float 
+            its a coefficient that used to avoid floating point imprecise operations. If two numbers have difference less than comparison_precision, they assumed to be equal. 
         Returns
         -------
-        an array includes all possible wealth levels until the specified trial.
+        a dictionary that its keys are the step-numbers of the planning depth (strats: from 0(initial value) to maximum: trials variable), and their related values are the possible amounts of wealth in that step.
 
         '''
         # add initial_wealth as the value of the first time-step. 
-        values=np.array([initial_wealth])
+        final_values={0:[initial_wealth]}
         for t in range(trials+1):
             # if it is the first time-step, pass
             if t==0:
                 pass
             else:
-                tmp_values=np.empty(0)
+                values=np.array(final_values[t-1])               
+                tmp_values=np.empty(0,float)
+
                 for val in cost_reward_values:
                     # next step values can be current ones + discounted value of each action, (except for the firts trial)
                     if t==1:
-                        tmp=values + val
+                        tmp=values+val
                     else:
-                        tmp=values + val*discount_factor
-                    tmp_values=np.append(tmp_values,tmp)
-                values=np.unique(np.append(values,tmp_values))   
-        return values
+                        tmp=values+val*discount_factor
+                    
+                    # check if calculated wealth levels are redundant
+                    for to_add_val in tmp:
+                        if len(tmp_values)==0:
+                            tmp_values=np.append(tmp_values,to_add_val)
+                        else:
+                            # Do floating point comparison: if their difference is less than a threshold (comparison_precision) we assume them equal.
+                            is_redundant=(sum(abs(tmp_values-to_add_val)<comparison_precision)>0)
+                            if is_redundant==False:
+                                tmp_values=np.append(tmp_values,to_add_val)
+                
+                #sort the values in ascending order
+                final_values[t]=np.sort(tmp_values).tolist()
+                
+        return final_values
     
     def chunk_mu(self,Y,S,pdf_chunks_counts):
         '''
@@ -478,7 +502,7 @@ class Bauerle_Rieder_agent(object):
                 int_say_result[i]=c
         return int_say_result
 
-    def say_calculator(self,x,action,x_prim,current_int_mu,z,current_possible_s):
+    def say_calculator(self,x,action,x_prim,current_int_mu,z,time_step, comparison_precision=1.0e-3):
         '''
         It applied the SAY updating rule to Mu-space.
 
@@ -491,12 +515,13 @@ class Bauerle_Rieder_agent(object):
         x_prim : int
             0 or 1 as the next observable-state (nex observation).
         current_int_mu : 2-D array of int
-            a reduced version of Mu-space points which contains only relevant points (regarding the possible S values 
-            at this time-step).
+            Mu-space points of the determined time step.
         z : float
             accumulated discount factor for this time-step (discount_factor ^ time-step).
-        current_possible_s : 1-D array of floats
-            all possible S(wealth) values until this time_step.
+        time_step : int
+            time step in which we want to update Mu-space.
+        comparison_precision: float 
+            its a coefficient that used to avoid floating point imprecise operations. If two numbers have difference less than comparison_precision, they assumed to be equal. 
 
         Returns
         -------
@@ -508,14 +533,17 @@ class Bauerle_Rieder_agent(object):
     
         # mus contains all possible current Mu-space combinations in this stage
         mus=current_int_mu*(1./self.num_of_PDF_chunks)
-        #print('size of Mu :',sys.getsizeof(mus),'len of Mu:',len(current_int_mu))
+        
+        all_current_s=self.S[time_step]
+        all_next_s=self.S[time_step+1]
+        
         
         # decompose Mu-beliefs about being in each state (y=0 or 1)
         mus_y0=mus[:,0:int(len(mus[0])/2)]
         mus_y1=mus[:,int(len(mus[0])/2):len(mus[0])]
         mus_ys=[mus_y0,mus_y1]
         
-        # Marginal Mu (Mu in power of Y in the paper, or Mu(dy,R)). This variable expresses the probability of being in each state(y)
+        # Marginal Mu (Mu superscript Y in the paper, or Mu(dy,R)). This variable expresses the probability of being in each state(y)
         marginal_mus_y0=mus_y0.sum(axis=1)
         marginal_mus_y1=mus_y1.sum(axis=1)
         marginal_mus_ys=[marginal_mus_y0,marginal_mus_y1]
@@ -545,9 +573,16 @@ class Bauerle_Rieder_agent(object):
         say_denominator=marginal_mus_y0*mq[0][action][x_prim]+marginal_mus_y1*mq[1][action][x_prim]
         
         # calculate the nomerator of the SAY function
+        
+        # The dimensions of the Mu-space doesn't change with just one action and one observation.  Because in our experiment the reward function is deterministic, all of possible wealths of this step, will transfer to just one other value 
+        # based on state and action. So, the size of Mu-space remains constant in SAY calculator function (for doing only one action). Also, the number of possible distributions over Mu, is not a concern for this function: It maps all current possible values to
+        # continious values, and pass that to other functions.
+        
         # allocate variables for results of nomerator calculations for each current state
-        for_y0=np.zeros((len(mus),len(self.S)*2))
-        for_y1=np.zeros((len(mus),len(self.S)*2))
+        
+        # these arrays are here to represent Mu distribution of the next state (naturally over its own (next state's) wealth levels) 
+        for_y0=np.zeros((len(mus),len(all_next_s)*2))
+        for_y1=np.zeros((len(mus),len(all_next_s)*2))
         next_mus=[for_y0,for_y1]
         
         # tmp_mus[0] for y=0 and tmp_mus[1] for y=1 calculations
@@ -558,33 +593,35 @@ class Bauerle_Rieder_agent(object):
             
             # mus_ys is Mu-beliefs about being in a staet (y)
             # probability of reaching y_prim=0
-            y_mus[:,:len(self.S)]=mus_ys[y]*q[y][action][y_prim0][x_prim]
+            y_mus[:,:len(all_current_s)]=mus_ys[y]*q[y][action][y_prim0][x_prim]
             # probability of reaching y_prim=1
-            y_mus[:,len(self.S):]=mus_ys[y]*q[y][action][y_prim1][x_prim]
+            y_mus[:,len(all_current_s):]=mus_ys[y]*q[y][action][y_prim1][x_prim]
             
             # Dirac function: d(s+zc(x,y,a))
-            # Here, we compute the possible values of s for next Mu distribution
-            next_possible_s=current_possible_s+z*c[y]
+            # Here, we compute the possible values of s for next Mu distribution         
+            next_possible_s=np.array(all_current_s)+z*c[y]
             
-            #The calculated Mu dist. on axis S, are assigned to the current s values, however these probabilities are for s+zc(y,a)
+            #The calculated Mu distributions on the S-axis, are defined on the current S values, however these probabilities are for s+zc(y,a).
             # so as the SAY function inputs are (x,a,x_prim), for each y we can rotate Mu(s) to be matched with next stage's possible values
             
-            # indexes of S axis which has value in this SAY calculation
-            current_s_indexes=np.where(np.isin(self.S,current_possible_s)==True)[0]
-            # indexes of S axis which which would be the successor, after current S-values recieving c(y,a) 
-            next_s_indexes=np.where(np.isin(self.S,next_possible_s)==True)[0]
+            ### indexes of S axis which has value in this SAY calculation
+            ##current_s_indexes=np.where(np.isin(self.S,current_possible_s)==True)[0]
             
-            
-            #tmp=np.zeros((len(mus),len(mus[0]))).astype(np.int8)
+            # indexes of the next wealth levels which are the successors ( after current S-values recieving c(y,a) )
+            # Here, we used comparison method to check the equality of next time-spte's S-values and current S-values+ z*c 
+            next_s_indexes=np.empty(0,np.int)
+            for ns in next_possible_s:
+                next_related_index=np.where(abs(all_next_s-ns)<1.0e-3)[0][0]
+                next_s_indexes=np.append(next_s_indexes,next_related_index)
+                
+
             #assign Mu-probability to each possible S(=previous_s + c) point
             # for S points in y_prim=0        
-            next_mus[y][:,next_s_indexes]=y_mus[:,current_s_indexes]
+            next_mus[y][:,next_s_indexes]=y_mus[:,:len(all_current_s)]
             # for S points in y_prim=1
-            next_mus[y][:,next_s_indexes+len(self.S)]=y_mus[:,current_s_indexes+len(self.S)]
+            next_mus[y][:,next_s_indexes+len(all_next_s)]=y_mus[:,len(all_current_s):]
             
-            #next_mus[y]=tmp[:]
-            
-        
+ 
         # sum of probabilities of next Mu-space for both conditions : p(mu|y0), p(mu|y1)
         say_nomerator=next_mus[0]+next_mus[1]
         
@@ -601,30 +638,38 @@ class Bauerle_Rieder_agent(object):
         # After finding the nearest correct point in Mu-space, we are using the values in base of num_of_PDF_chunks (not base of num_of_PDF_chunks*10) 
         int_say_result=(say_result*self.num_of_PDF_chunks*10).astype(np.int8)
         
-        #return say_result
         
         return self.nearest_grid_points(int_say_result)
 
     def last_step_RS_value(self ):
         '''
-        This function gets universal-Mu (possible Mus at the final stage of the task), as well as the type of utility function (utility function: a mapping of 
-        S-values to different utility values). The default is risk-neutral which means utilityValues=S-Values. Any other utility function should be implemented here.
+        This function reads possible Mus at the final stage of the task from saved files.And based-on the type of utility function (utility function: a mapping of 
+        S-values to different utility values), it calculates the utility values of the final stage. In this method the values are just assigned to the last step, therefore the utility funcion just applied to the last step.
+        The default is risk-neutral which means utilityValues=S-Values. Any other utility function should be implemented here. Here, we roughly implimented exponential utility. But, it needs a more general implementation.
         The value calculated by Sum(belief_about_a_level_of_wealth x utility_value_of_that_level_of_wealth)[regardless of y]
 
         Returns
         -------
         values : 1-D float
-            Returns an array in legnth of universal_Mu that elements represent
+            Returns an array in legnth of universal_Mu whose elements represent
             the value of each Mu-point at the final time-step .
 
         '''
+        
+        # load pre-calculated universal_Mu
+        file_path=os.path.join(self.universal_Mu_path,'time_step_'+str(self.max_time_step)+'.npy') 
+        final_step_Mu=np.load(file_path)
+        
+        
+        
+        
         # apply utility function on different wealth values
         if self.utility_function=='risk-neutral':
-            utility_mapped_values=self.S
+            utility_mapped_values=self.S[self.max_time_step]
         else:
             ###################### should impelement generally, but:
 
-            utility_mapped_values= (1/self.utility_function)* (1-np.exp(np.multiply(-self.S,self.utility_function)))
+            utility_mapped_values= (1/self.utility_function)* (1-np.exp(-1*np.array(self.S[self.max_time_step])*self.utility_function))
             
         
         # duplicate utility values to cover Y-dimension of the Mu-space
@@ -633,35 +678,45 @@ class Bauerle_Rieder_agent(object):
         # value of a Mu-point calculated as (probability of being in that S, regardless of y- or Mu(s)) x (utility value of that amount of wealth-or U(s))
         # the formula in the papaer is: integral(integral(Us)) Mu(ds,dy) which is equal above formula
         # Note: Here we trasform the integer mu-values to the dicretized floating poits value between 0 and 1
-        values=np.dot(self.universal_int_Mu/self.num_of_PDF_chunks,utility_mapped_values)
+        values=np.dot(final_step_Mu/self.num_of_PDF_chunks,utility_mapped_values)
+        
         return values  
 
-    def mu_to_index(self,mu):
+    def mu_to_index(self,mu,time_step):
         '''
-        This function gets an array of combinations of distributions over Mu-space and returns that points' indicator. It reads the previously 
-        saved mappings of universal-Mu points to indicators which are located in 'universal_mu_chunks' directory. The files contain dictionary data-structure with
+        This function gets an array of combinations of distributions over Mu-space as well as the time step and returns that points' indicator. It reads the previously 
+        saved mappings of Mu-space points to indicators which are located in 'universal_mu_chunks' directory. The files contain dictionary data-structure with
         keys= tuples of probabilities over Mu-space and values=an integer number as the indicator 
 
         Parameters
         ----------
         mu : 2-D array of int
             an array of Mu-points which we want to find their indexes.
+        time_step: int
+            an integer that determines the related time step
 
         Returns
         -------
         1-D array of int
-            the indexes of input points in the universal_Mu.
+            the indexes of input points in the time step's Mu.
 
         '''
         # get number of all files in the related directory
         path, dirs, files = next(os.walk("./Universal_Mu_chunks"))
-        file_count = len(files)
+        
+        # just fetch this time_step's files
+        related_files=[]
+        for file in files:
+            if file.startswith('step_'+str(time_step)):
+                related_files.append(file)
+                
+        file_count = len(related_files)
         
         # define a None vector to save final indicator numbers
         indicators=[None]*len(mu)
         # read all files one-by-one
-        for f in range(file_count):
-            map_file=np.load(os.path.join(self.Mu_chunks_path,'Mu_chunk_'+str(f)+'.npy'), allow_pickle=True).item()
+        for f,file_name in enumerate(related_files):
+            map_file=np.load(os.path.join(self.Mu_chunks_path,'step_'+str(time_step)+'_chunk_'+str(f)+'.npy'), allow_pickle=True).item()
             keys=map_file.keys()
             # for each mu point
             for i,res in enumerate(mu):
@@ -671,11 +726,15 @@ class Bauerle_Rieder_agent(object):
                 else:
                     r=tuple(res)
                     if (r in keys):            
-                        indicators[i]=map_file[r]    
+                        indicators[i]=map_file[r] 
+                        
+            # if all elements has been found, stop
+            if sum(i is None for i in indicators)==0:
+                break
     
         return indicators
    
-    def XA_value_calculator(self,x,action,current_possible_mu,time_step,current_possible_s):
+    def XA_value_calculator(self,x,action,current_possible_mu,time_step):
         '''
         This function calculates the value of given (x, action). 
         Based-on current x and given action it: 
@@ -693,11 +752,11 @@ class Bauerle_Rieder_agent(object):
         action : int
             index of selected action: 1 to 5.
         current_possible_mu : 2-D array of int
-            all valid Mu-points until this time-step.
-        time_step : int            
+            all valid Mu-points until this time-step.            
         current_possible_s : 1-D array of float
             possible accumulated wealths (s) during all previous steps (including current time-step).
-
+        time_step : int
+            
         Returns
         -------
         current_XA_value : array of floats
@@ -708,14 +767,16 @@ class Bauerle_Rieder_agent(object):
         next_step=time_step+1
         z=np.power(self.env.gamma,time_step)
         
+        half_mu_points=len(self.S[time_step])
+        current_possible_s=self.S[time_step]
         
         # value of the next internal-state (internal-state=(X,Mu,Z) )
         # this variable is the V(x_prim,say(mu),gamma*z) part of page 6 second equation.
         next_internalState_value_each_xPrim=np.array([np.empty(len(current_possible_mu)),np.empty(len(current_possible_mu))])
         
         # probability of being in each y
-        y_probs=(np.sum(current_possible_mu[:,0:len(self.S)],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1)
-        y_probs=np.append(y_probs,(np.sum(current_possible_mu[:,len(self.S):len(self.S)*2],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1),axis=1)
+        y_probs=(np.sum(current_possible_mu[:,0:half_mu_points],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1)
+        y_probs=np.append(y_probs,(np.sum(current_possible_mu[:,half_mu_points:half_mu_points*2],axis=1)/self.num_of_PDF_chunks).reshape(len(current_possible_mu),1),axis=1)
         
         # Q(x'|x,y,a).. which based-on the experiment design is equal to Q(x'|y,a)
         MQ=self.make_marginal_Q_kernel(self.env.transition_matrix,self.env.observation_matrix)
@@ -723,13 +784,10 @@ class Bauerle_Rieder_agent(object):
         # for each possible x_prim, calculate the values of the next internal-state 
         for i,x_prim in enumerate(list(self.env.observations.keys())):
             # VALUE of the next internal-state
-            next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,current_possible_s)
+            next_int_mu=self.say_calculator(x,action,x_prim,current_possible_mu,z,time_step,comparison_precision=1.0e-3)
             
-            next_indicators=np.array(self.mu_to_index(next_int_mu))
-            #print('====')
-            #print(x_prim)
-            #print(next_int_mu)
-            #print (next_indicators)
+            next_indicators=np.array(self.mu_to_index(next_int_mu,time_step+1))
+            
             if next_step==self.max_time_step:
                 next_mu_xPrim_z_value=self.value_function[-1][next_indicators]
             else:
@@ -769,57 +827,46 @@ class Bauerle_Rieder_agent(object):
         None. Just adds best values and best actions to 'value_function' and 'action_function' global variables.
 
         '''
-        int_mus=self.universal_int_Mu.copy()
-        # for test simulation
-        #current_possible_s=generate_possible_wealths([-2,-1,-0.5,1,2],time_step)
-        # the exact one
-        current_possible_s=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,time_step)
+        # load pre-calculated universal_Mu
+        file_path=os.path.join(self.universal_Mu_path,'time_step_'+str(time_step)+'.npy') 
+        int_mus=np.load(file_path)
+        int_mus=int_mus.astype(np.int8)
         
-        # find possible mu-points in this time_step and only consider them
-        impossible_mus_indexes=np.where(np.isin(self.S,np.array(current_possible_s))==False)[0]
-        impossible_mus_indexes=np.append(impossible_mus_indexes, impossible_mus_indexes+len(self.S))    
-        int_mus[:,impossible_mus_indexes]=0
-        int_mus=int_mus[np.where(int_mus.sum(axis=1)==self.num_of_PDF_chunks)].astype(np.int8)
+        current_possible_s=self.S[time_step]
         
-        # indicators of this stage's Mu-space
-        current_indicators=np.array(self.mu_to_index(int_mus))
-        self.step_indexes.insert(0,current_indicators)
         
         # value of each (x,a) pair
         XA_vals=np.array([[np.empty(len(int_mus))]*self.num_of_actions]*self.num_of_observable_states)
         
-        to_V=np.array([[None]*len(self.universal_int_Mu),[None]*len(self.universal_int_Mu)])
-        to_A=np.array([[None]*len(self.universal_int_Mu),[None]*len(self.universal_int_Mu)])
+        # to save results that we want to add to global value-function and actions
+        to_V=np.array([[None]*len(int_mus),[None]*len(int_mus)])       
+        to_A=np.array([[None]*len(int_mus),[None]*len(int_mus)])
         
+        # find values of each (x,a) pair 
         for x in range(len(XA_vals)):
             for action in range(len(XA_vals[x])):
-                #print('x:',x,'a:',action)
-                XA_vals[x][action]=self.XA_value_calculator(x,action,int_mus,time_step,current_possible_s)
-                #print('s:',current_possible_s)
-                #print('time_step:',time_step)
-                #print('mu:',int_mus)
-                #print(XA_vals[x][action])
-                #print('00000000000000000000000000000000000000000000000000000000000000000000000000000')
+                XA_vals[x][action]=self.XA_value_calculator(x,action,int_mus,time_step)
             
+            # among the actions, find the best action and its related value
             best_values=np.max(XA_vals[x], axis=0)
             best_actions=np.argmax(XA_vals[x], axis=0)
-            #print('best_values:',best_values)
-            #print('best action:',best_actions)
             
-            #rint(XA_vals)
-            #print('00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  ')
+            # for each x, record the best actions and their values
+            to_V[x]=best_values
+            to_A[x]=best_actions
             
-            to_V[x][current_indicators]=best_values
-            to_A[x][current_indicators]=best_actions
+        # add to global variables
         self.value_function.insert(0,to_V)
         self.action_function.insert(0,to_A)
+        
+        
         return   
 
     def reset(self,y0_prob,initiative_observation):
         '''
         It reset the agent to its belief about the initial wealth and set time-step to zero (begining of the simulation)
         This function distributes the probability equally over different s-values of initial wealths. The difference is
-        just applied to different idden states. This uniform distribution makes this function not a general one 
+        just applied to different hidden states. This uniform distribution makes this function not a general one 
         but for our experiment it was even more than enough.
 
         Parameters
@@ -839,23 +886,27 @@ class Bauerle_Rieder_agent(object):
             print('bad input value!')
             return
         else:
-            # making a Mu-point-shape zero array
-            self.current_internal_belief=np.zeros(len(self.S)*2)
+            self.current_internal_belief=[]
+            for s in range(self.max_time_step+1):
+                self.current_internal_belief.append(np.zeros(len(self.S[s])*2,float))
+             
             # set elements related to initial wealth value  
-            self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]]=y0_int_prob
-            self.current_internal_belief[np.where(self.S==self.initial_wealth)[0]+len(self.S)]=self.num_of_PDF_chunks-y0_int_prob
+            self.current_internal_belief[0][np.where(np.array(self.S[0])==self.initial_wealth)[0]]=y0_int_prob
+            self.current_internal_belief[0][np.where(np.array(self.S[0])==self.initial_wealth)[0]+len(self.S[0])]=self.num_of_PDF_chunks-y0_int_prob
+            
+            
             # set time-step=0
             self.current_internal_timeStep=0
+            
             # define a variable for current x
             self.current_internal_x=initiative_observation
             self.last_action=None
             
             # for simulation
-            beliefs_preview=np.tile(self.S,(3,1))
-            #print( beliefs_preview)
-            #print( self.current_internal_belief[:len(self.S)])
-            beliefs_preview[1]=np.divide(self.current_internal_belief[:len(self.S)],self.num_of_PDF_chunks)
-            beliefs_preview[2]=np.divide(self.current_internal_belief[len(self.S):],self.num_of_PDF_chunks)
+            beliefs_preview=np.zeros((3,1))
+            beliefs_preview[0]=self.S[0]            
+            beliefs_preview[1]=(self.current_internal_belief[0][:len(self.S[0])]*1./self.num_of_PDF_chunks).copy()
+            beliefs_preview[2]=self.current_internal_belief[0][len(self.S[0]):]*1./self.num_of_PDF_chunks
             
             print('initial beliefs:')
             print(beliefs_preview)
@@ -884,25 +935,30 @@ class Bauerle_Rieder_agent(object):
         else:
             
             # make current_internal_belief fit for mu_to_index function
-            self.current_internal_belief=np.array([self.current_internal_belief]).reshape(-1)
+            self.current_internal_belief[self.current_internal_timeStep]=np.array([self.current_internal_belief[self.current_internal_timeStep]]).reshape(-1)
             
             # index of current Mu
-            self.current_internal_Mu_index=self.mu_to_index(np.array([self.current_internal_belief]))
+            self.current_internal_Mu_index=self.mu_to_index(np.array([self.current_internal_belief[self.current_internal_timeStep]]),self.current_internal_timeStep)
+            
             
             # choose best action and its value from 'value_function' and 'action_function' variables 
+            
             best_action=self.action_function[self.current_internal_timeStep][self.current_internal_x][self.current_internal_Mu_index]
             value_of_action=self.value_function[self.current_internal_timeStep][self.current_internal_x][self.current_internal_Mu_index]
-            belief_at_action=self.current_internal_belief
+            belief_at_action=self.current_internal_belief[self.current_internal_timeStep]
             belief_index_at_action=self.current_internal_Mu_index
             
             # record the choosen action to use in updating function
             self.last_action=best_action[0]
             
             # for simulation
-            beliefs_preview=np.tile(self.S,(3,1))
-            beliefs_preview[1]=belief_at_action[:len(self.S)]/self.num_of_PDF_chunks
-            beliefs_preview[2]=belief_at_action[len(self.S):]/self.num_of_PDF_chunks
             
+            beliefs_preview=np.zeros((3,len(self.S[self.current_internal_timeStep])))
+            beliefs_preview[0]=self.S[self.current_internal_timeStep]
+            beliefs_preview[1]=belief_at_action[:len(self.S[self.current_internal_timeStep])]/self.num_of_PDF_chunks
+            beliefs_preview[2]=belief_at_action[len(self.S[self.current_internal_timeStep]):]/self.num_of_PDF_chunks
+            
+
             #return best_action[0],value_of_action[0],belief_at_action/self.num_of_PDF_chunks
             
             return best_action[0],value_of_action[0],beliefs_preview
@@ -920,17 +976,16 @@ class Bauerle_Rieder_agent(object):
         if self.current_internal_timeStep>=self.max_time_step:
             print('too much iterations!')
             return
-        else:     
-            # possible S-values of this time-step, just to give to SAY-calculator() 
-            next_step_possible_S=self.generate_possible_wealths(np.unique(self.env.rewards),self.initial_wealth,self.env.discount_factor,self.current_internal_timeStep)
+        else:      
             
             # update the current Mu
-            self.current_internal_belief=self.say_calculator(x=self.current_internal_x,
+            self.current_internal_belief[self.current_internal_timeStep+1]=self.say_calculator(x=self.current_internal_x,
                                 action=self.last_action,
                                 x_prim=new_observation,
-                                current_int_mu=np.array([self.current_internal_belief]),
+                                current_int_mu=np.array([self.current_internal_belief[self.current_internal_timeStep]]),
                                 z=np.power(self.env.gamma,self.current_internal_timeStep),
-                                current_possible_s=next_step_possible_S)
+                                time_step=self.current_internal_timeStep)
+            
             
             # increase time-step
             self.current_internal_timeStep=self.current_internal_timeStep+1
@@ -939,11 +994,15 @@ class Bauerle_Rieder_agent(object):
             self.current_internal_x=new_observation
             
             # for simulation
-            new_beliefs=np.array(self.current_internal_belief).reshape(-1)
-            new_beliefs_preview=np.tile(self.S,(3,1))
-            new_beliefs_preview[1]=np.divide(new_beliefs[:len(self.S)],self.num_of_PDF_chunks)
-            new_beliefs_preview[2]=np.divide(new_beliefs[len(self.S):],self.num_of_PDF_chunks)
             
+            new_beliefs=np.array(self.current_internal_belief[self.current_internal_timeStep]).reshape(-1)
+            new_beliefs_preview=np.zeros((3,len(self.S[self.current_internal_timeStep])))
+            new_beliefs_preview[0]=self.S[self.current_internal_timeStep]
+            new_beliefs_preview[1]=np.divide(new_beliefs[:len(self.S[self.current_internal_timeStep])],self.num_of_PDF_chunks)
+            new_beliefs_preview[2]=np.divide(new_beliefs[len(self.S[self.current_internal_timeStep]):],self.num_of_PDF_chunks)
+            
+            
+
             return new_beliefs_preview
         
         
