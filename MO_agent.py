@@ -42,13 +42,13 @@ class Multi_Variate_agent(object):
         self.current_internal_state=[]
         self.time_step=0
         self.last_action=-1
-        self.rounding_prec_coeff=10000
+        self.rounding_prec_coeff=100000
         
         
         return
 
 
-    def pre_planning(self,exp_vorfaktoren,exp_weights, initial_theta=[0.5,0.5],initial_observation=0 ):
+    def pre_planning(self,exp_vorfaktoren,exp_weights, initial_theta=[0.5,0.5],initial_observation=0,initial_wealth=0 ):
         
         # parameters
         env_dynamics=self.env_dynamics
@@ -59,6 +59,7 @@ class Multi_Variate_agent(object):
         self.exp_weights=exp_weights
         exp_num=len(self.exp_vorfaktoren)
         self.initial_observation=initial_observation
+        self.initial_wealth=initial_wealth
         
         # predefine all theta points(represented by integer values) and calculate their mappings by F and values by G
         int_theta,F,G,M=self.theta_transition_function_md(exp_vorfaktoren=exp_vorfaktoren,env_dynamics=env_dynamics,partitioning_chunk_number=partitioning_chunk_number)
@@ -67,7 +68,7 @@ class Multi_Variate_agent(object):
         all_theta=np.array(int_theta)/partitioning_chunk_number
 
         # initialize extended internal space ( theta_i1, theta_i2, .. , y)
-        x0=self.initialize_internal_state(theta_0=initial_theta, observation_0=initial_observation, exp_num=exp_num)
+        x0=self.initialize_internal_state(theta_0=initial_theta, observation_0=initial_observation, exp_num=exp_num,initial_wealth=initial_wealth)
         self.initial_state=x0
         self.current_internal_state=x0
         
@@ -91,7 +92,7 @@ class Multi_Variate_agent(object):
             
         elif agent_mode=='cheating':
             # find continoius (without partitioning)reachable internal states for each time step
-            reachable_states,x_map=self.continious_optimized_reachable_states(intial_x_state=x0,env_dynamics=env_dynamics,max_depth=planning_depth,rounding_prec_coeff=10000)
+            reachable_states,x_map=self.continious_optimized_reachable_states(initial_aug_state=x0,initial_wealth=initial_wealth,env_dynamics=env_dynamics,max_depth=planning_depth,rounding_prec_coeff=100000)
             
             #initialize value function ( dictionary from each possible state at each depth to their value (which are set to zero))
             # Here we don't consider the mapping of internal states that 'initial_value_function()' gives us. Instead, we use the second output of the 
@@ -229,16 +230,23 @@ class Multi_Variate_agent(object):
         F_map_md=theta_map_md      
         return int_theta,F_map_md,G_map_md,M
 
-    def initialize_internal_state(self,theta_0, observation_0, exp_num):
+    def initialize_internal_state(self,theta_0, observation_0, exp_num,initial_wealth):
         # internal state
         x=[]
+        r=[]
+        aug=[]
         # fill it by initial values of theta (2 elemnts) for each variate dimention (number of exponentials)
         for t in range(exp_num):
             x.append(theta_0[0])
             x.append(theta_0[1])
-        # append the value of the initial observation (y) to make internal state
+            r.append(initial_wealth)
+        # append the value of the initial observation (y) to make internal X-state
         x.extend([observation_0])
-        return x    
+        
+        # to make augmented states
+        aug=[tuple(x), tuple(r),0]
+        
+        return tuple(aug)    
 
     def find_reachable_states(self,intial_x_state,env_dynamics,F_map_md,max_depth,partitioning_chunk_number,exp_num,all_theta):
         
@@ -327,7 +335,7 @@ class Multi_Variate_agent(object):
         # for each time step:
         for step in range(len(reachable_states.keys())):
             # setting value of that time step's states to zero (make a dict. from states to values(0s)).
-            value_function= dict((key,0) for key in reachable_states[step])
+            value_function[step]= dict((key,0) for key in reachable_states[step])
             # setting a mapping from internal states to their indexes (in this time step)
             indexes=np.arange(len(reachable_states[step]))
             x_map[step]=dict(zip(reachable_states[step],indexes))
@@ -367,7 +375,7 @@ class Multi_Variate_agent(object):
         elif self.agent_mode=='naive':
             v,a,q,vf =self.value_iteration_naive(env_dynamics=self.env_dynamics,M_matrix=self.M,exp_vorfaktoren=self.exp_vorfaktoren,exp_weights=self.exp_weights,planning_depth=self.planning_depth,reachable_states=self.reachable_states,value_function=self.value_function,all_theta=self.all_theta,partitioning_chunk_number=self.partitioning_chunk_number)
         elif self.agent_mode=='cheating':
-            v,a,q =self.MO_cheating(self,planning_depth=self.planning_depth,exp_vorfaktoren=self.exp_vorfaktoren,exp_weights=self.exp_weights,rounding_prec_coeff=10000)
+            v,a,q =self.MO_cheating(self,planning_depth=self.planning_depth,exp_vorfaktoren=self.exp_vorfaktoren,exp_weights=self.exp_weights,rounding_prec_coeff=100000)
             
         else:
             print('bad agent_mode input!')
@@ -577,7 +585,7 @@ class Multi_Variate_agent(object):
     
     
     
-    def continious_optimized_reachable_states(self,intial_x_state,env_dynamics,max_depth,rounding_prec_coeff):
+    def continious_optimized_reachable_states(self,initial_aug_state,initial_wealth, env_dynamics,max_depth,rounding_prec_coeff):
               
         # setting parameters
         exp_num=len(self.exp_vorfaktoren)
@@ -587,16 +595,19 @@ class Multi_Variate_agent(object):
         
         # result variables
         
-        # reachables is a dictionary with keys: time steps & values: list of all possible internal states(Xs). 
-        # Each internal state has represented by a tuple contains (theta of the first exponential, theta of the second, ..., last (current) observation).
+        # reachables is a dictionary with keys: time steps & values: list of all possible internal states. 
+        # Each internal state has represented by a tuple contains: (X:which is a tuple of (theta of the first exponential, theta of the second, ..., last (current) observation) , R: which is a tupel of (accumulated reward
+        # regarding the first exp, acc_reward of exp2 ...) , and Z: which is the time step.
+        # e.g for u=e1+e2 : ((th1,th2,y'),(r1,r2),timeStep)
         reachables={}   
         
-        # mapping from each internal state (th1,th2,..y) and action and next observation to the successive internal state.
-        # ((th1,th2,..y),a,y')--> (th1',th2',...,y')
+        # mapping from each internal state and action and next observation to the successive internal state.
+        # (((th1,th2,..y),(r1,r2,...),time),a,y')--> ((th1',th2',...),(r1,r2,...)),y')
         universal_map={}    
         
         # set the first step
-        reachables[0]=[tuple(intial_x_state)]
+        r_state_vector=tuple([initial_wealth]*exp_num)
+        reachables[0]=[initial_aug_state]
         
         # M matrix
         # (i x action x observation x state x next_state)-> scalar   which contains smth like: (e^(lambda x cost) x probability)
@@ -610,7 +621,8 @@ class Multi_Variate_agent(object):
             for to_extend in reachables[depth-1]: 
                 
                 # State which we want to find its successors
-                to_extend=np.array(to_extend)
+                to_extend_r=np.array(to_extend[1])
+                to_extend_theta=np.array(to_extend[0])
                 
                 # this expansion of the decision three (by a specific action and a specific observation)
                 this_extention=[]
@@ -618,12 +630,14 @@ class Multi_Variate_agent(object):
                 for a in range(num_actions):  
                     for y_prim in range(num_observations):
                         
-                        next_x=[]
+                        next_x_theta=[]
+                        transition_cost_vector=[]
+                        next_x_r=[]
                         
                         for i in range(exp_num):
                             
                             # M x theta_i
-                            z=np.matmul(M[i,a,y_prim,:,:],to_extend[i*2:(i+1)*2].reshape(2,1))
+                            z=np.matmul(M[i,a,y_prim,:,:],to_extend_theta[i*2:(i+1)*2].reshape(2,1))
                             
                             # integral of M x Theta_i
                             integral=np.sum(z)
@@ -632,44 +646,104 @@ class Multi_Variate_agent(object):
                             next_theta=z/integral
                             
                             next_theta=next_theta.reshape(-1)
+                            
+                            next_theta=self.myRound(next_theta)
+                            
                             next_theta=next_theta.tolist()
-                            next_x.extend(next_theta)
+                            next_x_theta.extend(next_theta)
+                            
+                            # Cost part
+                            # G- function: next imediate reward
+                            g_i=np.log(integral)/self.exp_vorfaktoren[i]
+                            # C= G + log(|y|^(1/lambda_i))
+                            c_i=g_i +np.log(np.power(num_observations,1/self.exp_vorfaktoren[i]))
+                            
+                            
+                            c_i=self.myRound(c_i)
+                            c_i=c_i.tolist()
+                            # make vector of costs of each exponential dimension
+                            transition_cost_vector.append(c_i)
+                            
+                            
+                            
                             
                         # Add y' to the next theta to make next state: (th1', th2',... , y')
-                        next_x.append(y_prim)
+                        next_x_theta.append(y_prim)
                         
-                        new_entry=np.array(next_x)
+                        # update R part of the state
+                        z=np.power(self.env.discount_factor,(depth-1))                       
+                        z=self.myRound(z)
+                        
+                        next_x_r=to_extend_r+ np.array(transition_cost_vector)*z
+                        next_x_r=self.myRound(next_x_r)
+                        
+                        # make new internal state
+                        new_entry=(tuple(next_x_theta),tuple(next_x_r),depth)
+                        
+                        # fetch different parts (maybe it is redundant)
+                        current_theta=np.array(new_entry[0])
+                        current_acc_reward=np.array(new_entry[1])
+                        
+                       
+                        
                         
                         # Add the mapping of (internal state,action, next_observation) --> next internal state
-                        universal_map[(tuple(to_extend),a,y_prim)]= tuple(new_entry)
+                        universal_map[(tuple(to_extend),a,y_prim)]= new_entry
                         
                         # Check if the successive internal state is unique in the reachable states of the time step
                         # here we use rounding_prec_coeff to cut the decimal digits in a certain number. We also use this number to compare
                         # floating points, however we use 10x of that number in floating points for better precision.
                         
+                        
                         # let's take the next state unique
-                        is_unique=True
+                        redundants=0
+                        
+                        redundant_theta=False
+                        redundant_r=False
+                        
+                        
+                        
                         # for each next state which has been found until now
                         for rec in reachables[depth]:
-                            rec=np.array(rec)
-                            # if next state is redundant:
-                            if (np.max(np.abs(rec-new_entry))<1./(10*rounding_prec_coeff)):
-                                is_unique=False
-                                
-                        if is_unique:
-                            # cut the decimal digits with certain number 
-                            new_entry*=rounding_prec_coeff
-                            new_entry=new_entry.astype(np.int64)
-                            new_entry=new_entry.astype(np.float64)/rounding_prec_coeff
                             
+                            theta=np.array(rec[0])
+                            acc_reward=np.array(rec[1])
+                            
+                            # if next theta is redundant:
+                            if (np.max(np.abs(theta-current_theta))<1./(10*rounding_prec_coeff)):
+                                redundant_theta=True
+                                
+                            else:
+                                redundant_theta=False
+                                
+                            # if next accumulated reward is redundant
+                            if (np.max(np.abs(acc_reward-current_acc_reward))<1./(10*rounding_prec_coeff)):
+                                redundant_r=True
+                                
+                            else:
+                                redundant_r=False
+                                
+                            # if both theta and accumulated reward are redundant    
+                            if (redundant_theta and redundant_r):
+                                redundants+=1
+                                
+                        # if it is a unique (theta,acc_reward) pair        
+                        if redundants==0:
+                             
                             # add next step to reachable states of the time step
-                            reachables[depth].append(tuple(new_entry))
+                            reachables[depth].append((tuple(current_theta),tuple(current_acc_reward),depth))
                             
         return reachables,universal_map
 
                         
-
-    def MO_cheating(self,env_dynamics,planning_depth,exp_vorfaktoren,exp_weights,rounding_prec_coeff=10000):
+    def myRound(self,f,rounding_prec_coeff=100000,decimals=10):
+        #f=np.multiply(f,rounding_prec_coeff)
+        #f=f.astype(np.int64)
+        #f=f.astype(np.float64)/rounding_prec_coeff
+        f=np.round(f,decimals=decimals)
+        return f
+        
+    def MO_cheating(self,env_dynamics,planning_depth,exp_vorfaktoren,exp_weights,rounding_prec_coeff=100000):
             
         # 
         env_dynamics=self.env_dynamics
@@ -689,117 +763,160 @@ class Multi_Variate_agent(object):
         q_func={}
         # A list of dictionaries. For each time step there is a dict. Dict.s are mapping from keys: internal states in that timeStep
         # to values: index of the best action at that state
-        action_func=[0]*(max_depth)
+        action_func={}
         # A list of dictionaries. For each time step there is a dict. Dict.s are mapping from keys: internal states in that timeStep
         # to values: value of that state at that time_step
-        value_function=[0]*(max_depth)
+        value_function={}
         
         ## backwardly
         
         # from max_depth-1: becasue in our modeling the initial state is 0 and for n step of planning, 
         # the last step of decision-making will happends at the time step= n-1
-        for step in range(max_depth-1,-1,-1):
+        for step in range(max_depth,-1,-1):
             
-            # fetch list of all possible states in this thime Step
+            # fetch list of all possible states in this time Step
             this_step=list(map(list,reachable_states[step])).copy()
-            # make an empty Q(internal_state, actions)
-            q_tmp=np.empty((len(this_step),num_actions))
             
-            for a in range(num_actions):
-                
-                # value of all theta points for just this action
-                this_action_q=np.zeros((len(this_step),1))
-    
-                for y_prim in range(num_observations):
-                    
-                    # next state and cost of this (state,action, y_prim)
-                    this_y_prim_nextState=np.empty((len(this_step),2))
-                    this_y_prim_cost=np.zeros((len(this_step),1))
-                    
-                    for i in range(exp_num):
-    
-                        this_step=np.array(this_step)
-                        theta_i=this_step[:,i*2:2*i+2].copy().T
-                        
-                        # M x Theta_i
-                        z=np.matmul(M[i,a,y_prim,:,:],theta_i)
-                        z=z.T
-                        
-                        # Integral of M x theta_t
-                        integral=np.sum(z,axis=1).reshape(len(z),1)    
-                        
-                        # F- function: next theta_i
-                        next_theta_i=(z/integral)
-    
-                        # Cut the decimal digits with certain number 
-                        next_theta_i*=rounding_prec_coeff
-                        next_theta_i=next_theta_i.astype(np.int64)
-                        next_theta_i=next_theta_i.astype(np.float64)/rounding_prec_coeff
-    
-                        # Cost function
-                        # G- function
-                        g_i=np.log(integral)/exp_vorfaktoren[i]
-                        # C= G + log(|y|^(1/lambda_i))
-                        c_i=g_i +np.log(np.power(num_observations,1/exp_vorfaktoren[i])) 
-                              
-    
-                        # utility of cost
-                        this_y_prim_cost=this_y_prim_cost+exp_weights[i]*np.exp(exp_vorfaktoren[i]*c_i)
-                        
-    
-                        # concatenate next theta of all exponentional axes
-                        if i==0:
-    
-                            this_y_prim_nextState=next_theta_i
-                        else:
-                            this_y_prim_nextState=np.hstack((this_y_prim_nextState,next_theta_i))
-    
-                    # concatenate theta_prims with y_prim to make the next internal states
-                    this_y_prim_nextState=np.concatenate((this_y_prim_nextState,np.array([y_prim]*len(this_step)).reshape(len(this_step),1)),axis=1)
-                    
-                    # Accumulate cost of this action. This action can leads us to num_of_observations different successive internal states. 
-                    # Each of them is related to one of the next y_prims. So, we accumulate expected value of them to make the value of this action.
-                    # Note: to calculate expected value of actions we have P(x'|x,a)=1/|y| where x'=(th1',th2',...,y')               
-                    # if last decision-making step
-                    if step==max_depth-1:
-    
-                        this_action_q+=this_y_prim_cost * (1./num_observations)
-                        
-                    else:
-                        # to contain values of successive states 
-                        next_v=[]
-                        
-                        # for each element in the next states (not vectorized)
-                        for r,thet in enumerate(this_y_prim_nextState):
-                            thet=tuple(thet)
-                            # a bug
-                            if (exp_vorfaktoren[0]==-1.5 and exp_vorfaktoren[1]==-1.5 and exp_weights[0]==-1 and exp_weights[1]==-1 and self.initial_state[0]==0.75):
-                                pass
-                            next_v.append(value_function[step+1][thet])  
-                        next_v=np.array(next_v).reshape(len(this_step),1)
-                        
-                        # accumulate the weighted values of each y_prim case to make the expected value of this_action's value
-                        this_action_q+= (this_y_prim_cost + discount* next_v) * (1./num_observations)   
-    
-                # Q(current internal states, this action)
-                q_tmp[:,a]= this_action_q.reshape(len(this_step),)
-                
-            # choose best action, record values, record action values
-            best_actions=q_tmp.argmax(axis=1)
-            best_values=q_tmp.max(axis=1)
-    
-            # make timeStep-related element of result variables 
+            this_step_theta=list(map(list,(np.array(this_step,dtype=object)[:,0])))
+            this_step_r=list(map(list,(np.array(this_step,dtype=object)[:,1])))
+            
+            # make an empty Q(internal_state, actions)
+            
             q_func[step]={}
             action_func[step]={}
             value_function[step]={}
             
-            # fill the result variables in sequential manner
-            for p,point in enumerate(this_step):
-                point=tuple(point)
+            if step==max_depth:
+                val=np.zeros((len(this_step),1))
+                this_step_r=np.array(this_step_r)
+                for i in range(exp_num):
+                    
+                    val[:,0]+=np.exp(this_step_r[:,i]*exp_vorfaktoren[i])*exp_weights[i]
+                for p,point in enumerate(reachable_states[step]):
+                    
+                    q_func[step][point]=[val[p,0].copy()]*num_actions
+                   
+                    action_func[step][point]=-1
+                    value_function[step][point]=val[p,0].copy()
+            else:
+                
+                
+                for p,point in enumerate(reachable_states[step]):
+                    
+                    this_state_q_values=[0]*num_actions
+                    for action in range(num_actions):
+                        
+                        for y_prim in range(num_observations):
+                            
+                            val=value_function[step+1][self.x_map[(point,action,y_prim)]]
+                            pv=(1./num_observations)*val
+                            
+                            pv=self.myRound(pv)
+                            
+                            this_state_q_values[action]+=pv
+                            
+                    q_func[step][point]=this_state_q_values.copy()
+                    action_func[step][point]=np.argmax(this_state_q_values)
+                    value_function[step][point]=np.max(this_state_q_values)
+                                
+                
+                
+            #     for a in range(num_actions):
+                
+            #         # value of all theta points for just this action
+            #         this_action_q=np.zeros((len(this_step),1))
+        
+            #         for y_prim in range(num_observations):
+                    
+                        
+            #             # next state and cost of this (state,action, y_prim)
+            #             this_y_prim_nextState=np.empty((len(this_step),2))
+            #             this_y_prim_cost=np.zeros((len(this_step),1))
+                        
+            #             for i in range(exp_num):
+        
+            #                 this_step_theta=np.array(this_step_theta)
+            #                 theta_i=this_step_theta[:,i*2:2*i+2].copy().T
+                            
+            #                 # M x Theta_i
+            #                 z=np.matmul(M[i,a,y_prim,:,:],theta_i)
+            #                 z=z.T
+                            
+            #                 # Integral of M x theta_t
+            #                 integral=np.sum(z,axis=1).reshape(len(z),1)    
+                            
+            #                 # F- function: next theta_i
+            #                 next_theta_i=(z/integral)
+        
+            #                 # Cut the decimal digits with certain number 
+            #                 next_theta_i*=rounding_prec_coeff
+            #                 next_theta_i=next_theta_i.astype(np.int64)
+            #                 next_theta_i=next_theta_i.astype(np.float64)/rounding_prec_coeff
+        
+            #                 # Cost function
+            #                 # G- function
+            #                 g_i=np.log(integral)/exp_vorfaktoren[i]
+            #                 # C= G + log(|y|^(1/lambda_i))
+            #                 c_i=g_i +np.log(np.power(num_observations,1/exp_vorfaktoren[i])) 
+                                  
+        
+            #                 # utility of cost
+            #                 this_y_prim_cost=this_y_prim_cost+exp_weights[i]*np.exp(exp_vorfaktoren[i]*c_i)
+                            
+        
+            #                 # concatenate next theta of all exponentional axes
+            #                 if i==0:
+        
+            #                     this_y_prim_nextState=next_theta_i
+            #                 else:
+            #                     this_y_prim_nextState=np.hstack((this_y_prim_nextState,next_theta_i))
     
-                q_func[step][point]=q_tmp[p].copy()
-                action_func[step][point]=best_actions[p].copy()
-                value_function[step][point]=best_values[p].copy()
+            #         # concatenate theta_prims with y_prim to make the next internal states
+            #         this_y_prim_nextState=np.concatenate((this_y_prim_nextState,np.array([y_prim]*len(this_step)).reshape(len(this_step),1)),axis=1)
+                    
+            #         # Accumulate cost of this action. This action can leads us to num_of_observations different successive internal states. 
+            #         # Each of them is related to one of the next y_prims. So, we accumulate expected value of them to make the value of this action.
+            #         # Note: to calculate expected value of actions we have P(x'|x,a)=1/|y| where x'=(th1',th2',...,y')               
+            #         # if last decision-making step
+            #         if step==max_depth-1:
+    
+            #             this_action_q+=this_y_prim_cost * (1./num_observations)
+                        
+            #         else:
+            #             # to contain values of successive states 
+            #             next_v=[]
+                        
+            #             # for each element in the next states (not vectorized)
+            #             for r,thet in enumerate(this_y_prim_nextState):
+            #                 thet=tuple(thet)
+            #                 # a bug
+            #                 if (exp_vorfaktoren[0]==-1.5 and exp_vorfaktoren[1]==-1.5 and exp_weights[0]==-1 and exp_weights[1]==-1 and self.initial_state[0]==0.75):
+            #                     pass
+            #                 next_v.append(value_function[step+1][thet])  
+            #             next_v=np.array(next_v).reshape(len(this_step),1)
+                        
+            #             # accumulate the weighted values of each y_prim case to make the expected value of this_action's value
+            #             this_action_q+= (this_y_prim_cost + discount* next_v) * (1./num_observations)   
+    
+            #     # Q(current internal states, this action)
+            #     q_tmp[:,a]= this_action_q.reshape(len(this_step),)
+                
+            # # choose best action, record values, record action values
+            # best_actions=q_tmp.argmax(axis=1)
+            # best_values=q_tmp.max(axis=1)
+    
+            # # make timeStep-related element of result variables 
+            # q_func[step]={}
+            # action_func[step]={}
+            # value_function[step]={}
+            
+            # # fill the result variables in sequential manner
+            # for p,point in enumerate(this_step):
+            #     point=tuple(point)
+    
+            #     q_func[step][point]=q_tmp[p].copy()
+            #     action_func[step][point]=best_actions[p].copy()
+            #     value_function[step][point]=best_values[p].copy()
     
             
         self.q_func=q_func
@@ -828,17 +945,18 @@ class Multi_Variate_agent(object):
             action=np.argmax(self.q_func[self.time_step][self.x_map[tuple(self.current_internal_state)]])
             value_of_action=np.max(self.q_func[self.time_step][self.x_map[tuple(self.current_internal_state)]])
         elif self.agent_mode=='cheating':
-            action=self.action_func[self.time_step][tuple(self.current_internal_state)]
-            value_of_action=self.value_func[self.time_step][tuple(self.current_internal_state)]
+            action=self.action_func[self.time_step][self.current_internal_state]
+            value_of_action=self.value_func[self.time_step][self.current_internal_state]
         
         self.last_action=action
         
         return action,value_of_action
     
     def update_agent(self,new_observation):
+        num_observations=len(self.env.observations)
         # update internal state
         next_internal_x=[]
-        
+        transition_cost_vector=[]
         if self.agent_mode != 'cheating':
             for i in range(len(self.exp_vorfaktoren)):
                 theta_i=self.current_internal_state[i*2:i*2+2]
@@ -855,26 +973,48 @@ class Multi_Variate_agent(object):
         else:
             
             for i in range(len(self.exp_vorfaktoren)):
-                theta_i=self.current_internal_state[i*2:i*2+2]
+                theta_i=self.current_internal_state[0][i*2:i*2+2]
                 z=np.matmul(self.M[i,self.last_action,new_observation,:,:],np.array(theta_i).reshape(2,1))
                 integral=np.sum(z)
                 next_theta_i=z/integral
                 
                 # Cut the decimal digits with certain number 
-                next_theta_i*=self.rounding_prec_coeff
-                next_theta_i=next_theta_i.astype(np.int64)
-                next_theta_i=next_theta_i.astype(np.float64)/self.rounding_prec_coeff
+                next_theta_i=self.myRound(next_theta_i)
                 
                 next_theta_i=next_theta_i.reshape(-1)
                 next_theta_i=next_theta_i.tolist()
                 next_internal_x.extend(next_theta_i)
                 
+                
+                # Cost part
+                # G- function: next imediate reward
+                g_i=np.log(integral)/self.exp_vorfaktoren[i]
+                # C= G + log(|y|^(1/lambda_i))
+                c_i=g_i +np.log(np.power(num_observations,1/self.exp_vorfaktoren[i]))
+                
+                
+                c_i=self.myRound(c_i)
+                c_i=c_i.tolist()
+                # make vector of costs of each exponential dimension
+                transition_cost_vector.append(c_i)
+                
+                
+                
+                
             # Add y' to the next theta to make next state: (th1', th2',... , y')
             next_internal_x.append(new_observation)
             
-                
-        
-        self.current_internal_state=next_internal_x
+            z=np.power(self.env.discount_factor,(self.time_step))
+                        
+            z=self.myRound(z)
+            
+            next_x_r=np.array(list(self.current_internal_state[1]))+ np.array(transition_cost_vector)*z
+            
+            next_x_r=self.myRound(next_x_r)
+            
+            next_aug_state=(tuple(next_internal_x),tuple(next_x_r),self.time_step+1)
+       
+        self.current_internal_state=next_aug_state
         
         # update time
         self.time_step+=1

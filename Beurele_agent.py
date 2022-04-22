@@ -254,7 +254,7 @@ class Bauerle_Rieder_agent(object):
         return
     
     
-    def generate_possible_wealths(self,cost_reward_values,initial_wealth,discount_factor,trials,comparison_precision=1.0e-5):
+    def generate_possible_wealths(self,cost_reward_values,initial_wealth,discount_factor,trials,rounding_prec_coeff=100000):
         '''
         
         It Generates all possible (unique) amounts of cost/reward combinations during the trials.S-dimension of Mu. 
@@ -290,15 +290,25 @@ class Bauerle_Rieder_agent(object):
                     if t==1:
                         tmp=values+val
                     else:
-                        tmp=values+val*(discount_factor**(t-1))
+                        z=np.power(discount_factor,(t-1))
+                        
+                        z=self.myRound(z)
+                        
+                        tmp=values+val*z
+                        
+                    tmp=self.myRound(tmp)
                     
                     # check if calculated wealth levels are redundant
+                    
                     for to_add_val in tmp:
+                        is_redundant=False
                         if len(tmp_values)==0:
                             tmp_values=np.append(tmp_values,to_add_val)
                         else:
-                            # Do floating point comparison: if their difference is less than a threshold (comparison_precision) we assume them equal.
-                            is_redundant=(sum(abs(tmp_values-to_add_val))<comparison_precision)
+                            for prev_saved_val in tmp_values:
+                                # Do floating point comparison: if their difference is less than a threshold (comparison_precision) we assume them equal.
+                                if (np.sum(np.abs(prev_saved_val-to_add_val))<1./(10*rounding_prec_coeff)):
+                                    is_redundant=True
                             if is_redundant==False:
                                 tmp_values=np.append(tmp_values,to_add_val)
                 
@@ -870,8 +880,15 @@ class Bauerle_Rieder_agent(object):
         
         
         return   
+    
+    def myRound(self,f,rounding_prec_coeff=100000,decimals=10):
+        #f=np.multiply(f,rounding_prec_coeff)
+        #f=f.astype(np.int64)
+        #f=f.astype(np.float64)/rounding_prec_coeff
+        f=np.round(f,decimals=decimals)
+        return f
 
-    def continious_optimized_planning(self, initial_mu_state,initial_wealth,exp_weights,exp_vorfaktoren,comparison_precision=1.0e-4):
+    def continious_optimized_planning(self, initial_mu_state,initial_observation,initial_wealth,exp_weights,exp_vorfaktoren,rounding_prec_coeff=100000):
         
         
         # setting parameters
@@ -888,22 +905,22 @@ class Bauerle_Rieder_agent(object):
         
         
         
-        # reachables Mu-states in each time step. Here, like the complete version, observations (observable states in the paper) 
-        # are not influential in the transitions. Therefore, we exclude them from the extended states. Also,the discount factor is coeded in the time step.
-        # 'b_reachables' is dict. from timeSteps to a list of their unique Mu values (represented by tuples).
+        # reachable internal-states in each time step. It is a dictionary from time-steps to list of reachable internal states in that depth. The representation of internal states is:
+        # a tuple contains: (X: observable part of state which here is equal to observation, Mu-state: a tuple that represents probability dist. over space Wealths x hiddenStates, Z: which is time step).
         b_reachables={}
         
-        # Transition Kernel ( and not TK insurance company! :) ). a mapping from (Mu-states, action,next_observation) to the (next Mu-state). 
+       
+        
+        # Transition Kernel ( and not TK insurance company! :) ). a mapping from (internal state, action,next_observation) to the (next internal state). 
         # 'TK' is a nested dictionarty. The outer dict.'s keys are time steps and the values are the inner dicts. The inner dicts are mappings 
-        # from (current Mu state, action, next observation) in timeStep t --> (next Mu state) of timeStep t+1. By having the  y', Mu'  and timeStep we can 
-        # reproduce the internal state like Beurele paper.
-        # Note, each Mu point is represented by a tuple.
+        # from (current internal-state, action, next observation) in timeStep t --> (next internal_state) of timeStep t+1. 
+        # Note, each Mu point is also represented by a tuple.
         TK={}
 
         
         
         # make possible wealth values
-        Ss=self.generate_possible_wealths(np.unique(self.env.rewards),initial_wealth,self.env.discount_factor,self.max_time_step,comparison_precision=comparison_precision)
+        Ss=self.generate_possible_wealths(np.unique(self.env.rewards),initial_wealth,self.env.discount_factor,self.max_time_step,rounding_prec_coeff=100000)
         
         ## precalculate needed variables
         
@@ -917,17 +934,22 @@ class Bauerle_Rieder_agent(object):
         
         # make and add all possible internal states in each timeStep
         for step in range(maximum_depth):
-            
+            # set initial internal-state
             if step==0:
-                b_reachables[0]=[tuple(initial_mu_state)]
+                b_reachables[0]=[(initial_observation,tuple(initial_mu_state),0)]
+                
+            # fetch just Mu points of internal-states
+            b_reachable_mu=np.array(list(map(list,b_reachables[step])),dtype=object)[:,1].tolist()
+            #print(b_reachable_mu)
             
             thisStep_s=Ss[step]
             # ls is the number of possible wealth levels in this timeStep as well as half of Mu points' lenght in this timeStep 
             ls=len(thisStep_s)
-            mus=np.reshape(b_reachables[step],(len(b_reachables[step]),len(b_reachables[step][0])))
+            mus=np.reshape(b_reachable_mu,(len(b_reachable_mu),len(b_reachable_mu[0])))
             
-            z=self.env.discount_factor**step
+            z=np.power(self.env.discount_factor,step)
             
+            z=self.myRound(z)
             # fetch all wealth values of this step and the successive ones
             all_current_s=thisStep_s
             all_next_s=Ss[step+1]
@@ -948,6 +970,7 @@ class Bauerle_Rieder_agent(object):
             
             # prepare the timeStep related elements of the result variabes
             b_reachables[step+1]=[]
+            
             TK[step]={}
                 
                 
@@ -973,7 +996,7 @@ class Bauerle_Rieder_agent(object):
                     # It is equal to probaility of recieving observation x_prim, regardless of what are the wealth(s) or the state(y). 
                     # It calculate sum of probabilities of reaching each state (regardless of wealth level) (marginal_mus_y), while reaciving x_prime observation
                     say_denominator=marginal_mus_y0*mq[0][action][x_prim]+marginal_mus_y1*mq[1][action][x_prim]
-                    
+                    say_denominator=self.myRound(say_denominator)
                     
                     ### calculate the nomerator of the SAY function
                 
@@ -1004,6 +1027,7 @@ class Bauerle_Rieder_agent(object):
                         # Dirac function: d(s+zc(x,y,a))
                         # Here, we compute the possible values of s for next Mu distribution         
                         next_possible_s=np.array(all_current_s)+z*c[y]
+                        next_possible_s=self.myRound(next_possible_s)
         
                         #The calculated Mu distributions on the S-axis, are defined on the current S values, however these probabilities are for s+zc(y,a).
                         # so as the SAY function inputs are (x,a,x_prim), for each y we can rotate Mu(s) to be matched with next stage's possible values
@@ -1015,7 +1039,8 @@ class Bauerle_Rieder_agent(object):
                         # Here, we used comparison method to check the equality of next time-spte's S-values and current S-values+ z*c 
                         next_s_indexes=np.empty(0,np.int32)
                         for ind,ns in enumerate(next_possible_s):
-                            next_related_index=np.where(np.abs(np.array(all_next_s)-ns)<comparison_precision)[0][0]
+                            
+                            next_related_index=np.where(np.abs(np.array(all_next_s)-ns)<(1/(rounding_prec_coeff*10)))[0][0]
                             next_s_indexes=np.append(next_s_indexes,next_related_index)
         
         
@@ -1028,48 +1053,60 @@ class Bauerle_Rieder_agent(object):
         
                     # sum of probabilities of next Mu-space for both conditions : p(mu|y0), p(mu|y1)
                     say_nomerator=next_mus[0]+next_mus[1]
-        
+                    say_nomerator=self.myRound(say_nomerator)
                     # calculate final SAY result
                     # normalize the whole Mu-space dist. by dividing it by totoal probability of taking x_prim
                     say_result=say_nomerator/say_denominator[:,None]  
-                    
+                    say_result=self.myRound(say_result)
                     ### make extended states and transition kernel between them
                     # loop over the elements of say_result(not vectorized):
                     for p in range(len(say_result)):
          
                         
-                        ## reachable extended states
+                        
+                        ## reachable Mu states
                         redundants=[]
                         is_unique=True
                         for i in range(len(nextStep_uniques)):
-                            if np.sum(np.abs(np.array(say_result[p])-np.array(nextStep_uniques[i])))<comparison_precision:
+                            
+                            # fecth each part of the successive states
+                            nst_mu=np.array(list(nextStep_uniques[i][1]))
+                            nst_x=nextStep_uniques[i][0]
+                            
+                            # if the successive internal_state is redundant .(its X part as well as its Mu part ) 
+                            if ((np.sum(np.abs(np.array(say_result[p])-nst_mu))<1/(10*rounding_prec_coeff)) and (x_prim==nst_x)):
                                 is_unique=False
                                 redundants.append(i)
-                                
+                              
                         if is_unique:
                             
                             # add unique values for other comparisons
-                            #nextStep_uniques[0].extend([x_prim])
-                            nextStep_uniques.append(say_result[p])
+                            nextStep_uniques.append((x_prim,tuple(say_result[p]),step+1))
                             
                             # adding to extended reachable states
-                            b_reachables[step+1].append((tuple(say_result[p])))
+                            b_reachables[step+1].append((x_prim,tuple(say_result[p]),step+1))
                             
                             # transition kernel of extended states
-                            
-                            ex_state=tuple(say_result[p])
-                            #
+                            # dict value                            
+                            ex_state=(x_prim,tuple(say_result[p]),step+1)
+                            # dict key
                             ex_kernel_element=(b_reachables[step][p],action,x_prim)
-        
+                            
                             TK[step][ex_kernel_element]=ex_state
+                            
+                           
                         else:
-                            ## transition kernel of extended states
                             
-                            ex_state=tuple(nextStep_uniques[redundants[0]])
-                            # 
+                            # use that previously saved internal-state that was equal to current successive
+                            
+                            ex_state=nextStep_uniques[redundants[0]]
+                            
                             ex_kernel_element=(b_reachables[step][p],action,x_prim)
         
                             TK[step][ex_kernel_element]=ex_state
+                            
+                        
+                        
                             
         #######################################################################
         #                           Value Iteration                           #
@@ -1089,42 +1126,85 @@ class Bauerle_Rieder_agent(object):
             
             points=b_reachables[step]
             
+            value_func[step]={}
+            action_func[step]={}
+            full_val_func[step]={}
+            
+                
             if step==maximum_depth:
+                # fecth just Mu parts of rechable states
+                points_mu=[]
+                for i in range(len(points)):
+                    points_mu.append(points[i][1])
+                
                 
                 # Calculate the utility of each possible wealth level in the last timeStep
                 each_wealth_level_value=self.utility_evaluator(Ss[step],exp_weights,exp_vorfaktoren)
                 
                 # Calculate the utility of each possible last Mu state
-                each_mu_value=np.dot(np.array(list(map(list,points))),np.hstack([each_wealth_level_value,each_wealth_level_value]).T)
+                each_mu_value=np.dot(np.array(list(map(list,points_mu))),np.hstack([each_wealth_level_value,each_wealth_level_value]).T)
+                each_mu_value=self.myRound(each_mu_value)
+                
                 
                 # fill valu_func and full_val_func variables
-                value_func[step]=np.hstack([dict(zip(points,each_mu_value.reshape(-1))).copy(),dict(zip(points,each_mu_value.reshape(-1))).copy()])               
-                full_val_func[step]=[dict(zip(points,each_mu_value.reshape(-1))).copy()]
+                value_func[step]=dict(zip(points,each_mu_value.reshape(-1))).copy()               
+                full_val_func[step]=dict(zip(points,each_mu_value.reshape(-1))).copy()
+                
+                #value_func[step]=np.hstack([dict(zip(points,each_mu_value.reshape(-1))).copy(),dict(zip(points,each_mu_value.reshape(-1))).copy()])               
+                #full_val_func[step]=[dict(zip(points,each_mu_value.reshape(-1))).copy()]
                 
             else:
-                # make different variables for different observable (x) states. Here, they are current(or last) observations and they have no influence on the results.
-                # saving them is somehow redundant. But we save them separately to have an internal state space like the paper.
-                val_x0=np.zeros((len(points),num_actions))
-                val_x1=np.zeros((len(points),num_actions))
-                val_x=[val_x0,val_x1]
-                # for each curreny observation (x)
-                for x in observations:
+                tmp_q=np.zeros((len(points),num_actions))
+                              
+                for p,point in enumerate(points):
+                    
                     for a in range(num_actions):
-                        for p,point in enumerate(points):
+                        this_action_value=0
+                        for x_prim in observations:
                             # value of this internal state and action is equal to the value of the successive state (only its Mu part)
-                            val_x[x][p][a]=value_func[step+1][x][TK[step][(point,a,x)]]
+                            val_xprim=value_func[step+1][TK[step][(point,a,x_prim)]]
+                            p_y0= np.sum(list(point[1])[:len(Ss[step])])
+                            p_y1= np.sum(list(point[1])[len(Ss[step]):])
+                            p_xprim=mq[0][a][x_prim]*p_y0 +mq[1][a][x_prim]*p_y1
+                            
+                            this_xprim_value= p_xprim * val_xprim
+                            
+                            this_action_value+=this_xprim_value
+                            
+                        tmp_q[p][a]=this_action_value
+                        
+                    tmp_best_action=np.argmax(tmp_q[p])
+                    tmp_val=np.max(tmp_q[p])
+                    #print(tmp_q[p],tmp_best_action,tmp_val)
+                    value_func[step][point]=tmp_val
+                    action_func[step][point]=tmp_best_action
+                    full_val_func[step][point]=tmp_q[p]
+                            
+                            
+                            
+                # # make different variables for different observable (x) states. Here, they are current(or last) observations and they have no influence on the results.
+                # # saving them is somehow redundant. But we save them separately to have an internal state space like the paper.
+                # val_x0=np.zeros((len(points),num_actions))
+                # val_x1=np.zeros((len(points),num_actions))
+                # val_x=[val_x0,val_x1]
+                # # for each curreny observation (x)
+                # for x in observations:
+                #     for a in range(num_actions):
+                #         for p,point in enumerate(points):
+                #             # value of this internal state and action is equal to the value of the successive state (only its Mu part)
+                #             val_x[x][p][a]=value_func[step+1][x][TK[step][(point,a,x)]]
                     
-                    # best action and values for each observable state (redundant)
-                    to_v0=np.max(val_x0,axis=1)
-                    to_a0=np.argmax(val_x0,axis=1)
+                #     # best action and values for each observable state (redundant)
+                #     to_v0=np.max(val_x0,axis=1)
+                #     to_a0=np.argmax(val_x0,axis=1)
                     
-                    to_v1=np.max(val_x1,axis=1)
-                    to_a1=np.argmax(val_x1,axis=1)
+                #     to_v1=np.max(val_x1,axis=1)
+                #     to_a1=np.argmax(val_x1,axis=1)
                 
-                # save results in this step. Each of them is a list of two results regarding the different observable part of states. 
-                value_func[step]=np.hstack([dict(zip(points,to_v0)).copy(),dict(zip(points,to_v1)).copy()])
-                action_func[step]=np.hstack([dict(zip(points,to_a0)).copy(),dict(zip(points,to_a1)).copy()])
-                full_val_func[step]=[dict(zip(points,val_x0)).copy()]
+                # # save results in this step. Each of them is a list of two results regarding the different observable part of states. 
+                # value_func[step]=np.hstack([dict(zip(points,to_v0)).copy(),dict(zip(points,to_v1)).copy()])
+                # action_func[step]=np.hstack([dict(zip(points,to_a0)).copy(),dict(zip(points,to_a1)).copy()])
+                # full_val_func[step]=[dict(zip(points,val_x0)).copy()]
         
         self.value_func=value_func
         self.action_func=action_func
@@ -1149,7 +1229,7 @@ class Bauerle_Rieder_agent(object):
         self.current_internal_x=initial_observation
         
         # set the initial Mu state
-        self.current_internal_belief=initial_mu_state
+        self.current_internal_state=(initial_observation, tuple(initial_mu_state),0)
         
         #set initial wealth
         self.initial_wealth=initial_wealth
@@ -1167,13 +1247,13 @@ class Bauerle_Rieder_agent(object):
             return
         else:
             
-            best_action=self.action_func[self.current_internal_timeStep][self.current_internal_x][tuple(self.current_internal_belief)]
-            value_best_action=self.value_func[self.current_internal_timeStep][self.current_internal_x][tuple(self.current_internal_belief)]
+            best_action=self.action_func[self.current_internal_timeStep][self.current_internal_state]
+            value_best_action=self.value_func[self.current_internal_timeStep][self.current_internal_state]
             
             # update last action
             self.last_action=best_action
             
-            return best_action,value_best_action,self.current_internal_belief
+            return best_action,value_best_action,self.current_internal_state
     
     def ch_update_agent(self,new_observation):
         
@@ -1185,7 +1265,7 @@ class Bauerle_Rieder_agent(object):
         else:      
             
             # update the current Mu
-            self.current_internal_belief=list(self.transition_kernel[self.current_internal_timeStep][(tuple(self.current_internal_belief),self.last_action,new_observation)])
+            self.current_internal_state=self.transition_kernel[self.current_internal_timeStep][(self.current_internal_state,self.last_action,new_observation)]
             
             
             # increase time-step
@@ -1194,7 +1274,7 @@ class Bauerle_Rieder_agent(object):
             # update current observable-state 
             self.current_internal_x=new_observation
             
-            return self.current_internal_belief
+            return self.current_internal_state
         
     
     def reset(self,y0_prob,initiative_observation):
